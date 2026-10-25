@@ -35,4 +35,7 @@
     <ProjectReference Include="..\Services\NotificationService\NotificationService.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <None Include="../../fixtures/telemetry/provenance-v1.json" Link="fixtures/provenance-v1.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
 </Project>

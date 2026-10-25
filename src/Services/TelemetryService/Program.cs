@@ -37,7 +37,7 @@ if (args.Contains("--migrate", StringComparer.Ordinal))
     await using (var migrationLock = new NpgsqlCommand("SELECT pg_advisory_xact_lock(20261005)", database, transaction))
         await migrationLock.ExecuteNonQueryAsync();
     var directory = Environment.GetEnvironmentVariable("TELEMETRY_MIGRATIONS_DIR") ?? "deploy/migrations";
-    foreach (var file in new[] { "telemetry-schema.sql", "20261005_telemetry_delivery.sql", "20261006_dashboard_outbox_index.sql", "20261006_sensor_metadata.sql", "20261025_onesa_provenance.sql" })
+    foreach (var file in new[] { "telemetry-schema.sql", "20261005_telemetry_delivery.sql", "20261006_dashboard_outbox_index.sql", "20261006_sensor_metadata.sql", "20261025_onesa_provenance.sql", "20261026_telemetry_quarantine.sql" })
     {
         var sql = await File.ReadAllTextAsync(Path.Combine(directory, file));
         await using var command = new NpgsqlCommand(sql, database, transaction);
@@ -71,7 +71,7 @@ var host = Host.CreateDefaultBuilder(args)
 
         services.AddTransient<TelemetryFunction>();
         services.AddHostedService<TelemetryOutboxService>();
-        services.AddHttpClient("dashboard-ingestion", client => client.Timeout = TimeSpan.FromSeconds(10));
+        services.AddHttpClient("dashboard-ingestion", client => client.Timeout = TimeSpan.FromSeconds(10)).ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
         // Share one subscriber instance between the worker and its readiness endpoint.
         services.AddSingleton<MqttTelemetrySubscriberService>();
         services.AddHostedService(serviceProvider => serviceProvider.GetRequiredService<MqttTelemetrySubscriberService>());
