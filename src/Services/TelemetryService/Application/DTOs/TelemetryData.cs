@@ -3,6 +3,7 @@ namespace SmartFactory.Services.TelemetryService.Application.DTOs
     /// <summary>Normalized edge payload. Timestamp is Unix epoch milliseconds in UTC.</summary>
     public class TelemetryData
     {
+        public System.Text.Json.JsonElement? Integration { get; set; }
         public string DeviceId { get; set; } = string.Empty;
         public string? GatewayId { get; set; }
         public string? AssetId { get; set; }

@@ -3,6 +3,7 @@ namespace SmartFactory.Services.TelemetryService.Domain.Entities
     public class TelemetryRecord
     {
         public int Id { get; set; }
+        public string? IntegrationJson { get; set; }
         public string DeviceId { get; set; } = string.Empty;
         public string? GatewayId { get; set; }
         public string? AssetId { get; set; }

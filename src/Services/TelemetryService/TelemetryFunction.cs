@@ -48,12 +48,16 @@ namespace SmartFactory.Services.TelemetryService
                 data.Temperature, data.Humidity, data.Vibration, data.Power, data.Pressure, data.Rpm,
                 AssetSignals = data.AssetSignals is null ? null : new SortedDictionary<string, double>(data.AssetSignals, StringComparer.Ordinal),
             };
-            var ingestionId = Convert.ToHexString(SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(normalized))).ToLowerInvariant();
+            var identityBytes = data.Integration is null || data.Integration.Value.ValueKind == JsonValueKind.Null
+                ? JsonSerializer.SerializeToUtf8Bytes(normalized)
+                : JsonSerializer.SerializeToUtf8Bytes(new { Legacy = normalized, data.Integration });
+            var ingestionId = Convert.ToHexString(SHA256.HashData(identityBytes)).ToLowerInvariant();
             var record = await _dbContext.TelemetryRecords.FirstOrDefaultAsync(item => item.IngestionId == ingestionId);
             if (record is null)
             {
                 record = new TelemetryRecord
                 {
+                    IntegrationJson = data.Integration?.GetRawText(),
                     DeviceId = data.DeviceId, GatewayId = data.GatewayId, AssetId = data.AssetId,
                     SensorType = data.SensorType, SensorStatus = data.SensorStatus,
                     AssetSignalsJson = data.AssetSignals is null ? null : JsonSerializer.Serialize(data.AssetSignals),
@@ -77,6 +81,14 @@ namespace SmartFactory.Services.TelemetryService
 
         public static bool ValidTelemetry(TelemetryData data)
         {
+            if (data.Integration is JsonElement integration && integration.ValueKind != JsonValueKind.Null)
+            {
+                if (integration.ValueKind != JsonValueKind.Object || integration.GetRawText().Length > 8192 ||
+                    !integration.TryGetProperty("mode", out var mode) || mode.ValueKind != JsonValueKind.String || mode.GetString() is not ("live" or "simulated" or "replay") ||
+                    !integration.TryGetProperty("gatewayReceivedAt", out var received) || received.ValueKind != JsonValueKind.String || !DateTimeOffset.TryParse(received.GetString(), out _) ||
+                    (mode.GetString() == "simulated" && !integration.TryGetProperty("scenarioRunId", out _)) ||
+                    (mode.GetString() == "replay" && !integration.TryGetProperty("replayRunId", out _))) return false;
+            }
             const double MaxMetricMagnitude = 1_000_000_000;
             // Arduino millis() and several industrial counters are unsigned
             // 32-bit values. Keep named signals bounded without rejecting a
@@ -133,6 +145,7 @@ namespace SmartFactory.Services.TelemetryService
                     {
                         Content = JsonContent.Create(new
                         {
+                            integration = record.IntegrationJson is null ? (JsonElement?)null : JsonSerializer.Deserialize<JsonElement>(record.IntegrationJson),
                             deviceId = record.DeviceId, gatewayId = record.GatewayId, assetId = record.AssetId,
                             sensorType = record.SensorType, sensorStatus = record.SensorStatus,
                             assetSignals = record.AssetSignalsJson is null ? null : JsonSerializer.Deserialize<Dictionary<string, double>>(record.AssetSignalsJson),

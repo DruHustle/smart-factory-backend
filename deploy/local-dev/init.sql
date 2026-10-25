@@ -53,3 +53,6 @@ DROP INDEX IF EXISTS "IX_TelemetryRecords_PendingDelivery";
 CREATE INDEX "IX_TelemetryRecords_PendingDelivery"
   ON "TelemetryRecords" ("NextDeliveryAttemptAt", "Id")
   WHERE "IngestionId" IS NOT NULL AND "DashboardForwardedAt" IS NULL;
+
+-- Optional provenance must exist even when the local worker starts without --migrate.
+ALTER TABLE "TelemetryRecords" ADD COLUMN IF NOT EXISTS "IntegrationJson" text NULL;
