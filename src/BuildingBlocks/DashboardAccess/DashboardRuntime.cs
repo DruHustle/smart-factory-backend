@@ -55,15 +55,17 @@ public static class DashboardRuntime
     public static void UseDashboardAccess(this WebApplication app, string schemaProbe)
     {
         var token = app.Configuration["DASHBOARD_SERVICE_TOKEN"]!;
+        var service = app.Environment.ApplicationName switch { "IdentityService" => "identity-service", "AnalyticsService" => "analytics-service", "NotificationService" => "notification-service", _ => "dotnet-dashboard" };
         app.Use(async (context, next) => {
             if (!context.Request.Path.StartsWithSegments("/api")) { await next(); return; }
             if (!ValidToken(context.Request.Headers["X-Service-Token"].ToString(), token) ||
                 !int.TryParse(context.Request.Headers["X-User-Id"], out var id) || id < 1)
-            { context.Response.StatusCode = 401; return; }
+            { context.Response.StatusCode = 401; await SecurityObservation.Record(context.RequestServices.GetRequiredService<DashboardStore>(), service, 401, app.Logger, context.RequestAborted); return; }
             var user = await context.RequestServices.GetRequiredService<DashboardStore>().GetUser(id, context.RequestAborted);
-            if (user is null) { context.Response.StatusCode = 401; return; }
+            if (user is null) { context.Response.StatusCode = 401; await SecurityObservation.Record(context.RequestServices.GetRequiredService<DashboardStore>(), service, 401, app.Logger, context.RequestAborted); return; }
             context.Items["dashboardUser"] = user;
             await next();
+            if(context.Response.StatusCode==403) await SecurityObservation.Record(context.RequestServices.GetRequiredService<DashboardStore>(),service,403,app.Logger,context.RequestAborted);
         });
         app.MapGet("/health/live", () => Results.Ok(new { status = "live" }));
         app.MapGet("/health/ready", async (DashboardStore store, CancellationToken ct) => {

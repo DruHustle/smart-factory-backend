@@ -1,3 +1,4 @@
+using SmartFactory.BuildingBlocks.DashboardAccess;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
@@ -56,7 +57,14 @@ builder.Services.AddHttpClient<AasProvisioningService>(client => client.Timeout 
 builder.Services.AddScoped<IDeviceRepository, DeviceRepository>();
 builder.Services.AddHealthChecks();
 
+var securityConnection=builder.Configuration["DASHBOARD_DATABASE_CONNECTION"];
+if(!string.IsNullOrWhiteSpace(securityConnection))builder.Services.AddSingleton(new DashboardStore(securityConnection,builder.Environment.IsProduction()));
 var app = builder.Build();
+app.Use(async (context,next)=>{
+    await next();
+    if(context.Request.Path.StartsWithSegments("/api") && SecurityObservation.RejectionType(context.Response.StatusCode) is not null && context.RequestServices.GetService<DashboardStore>() is { } securityStore)
+        await SecurityObservation.Record(securityStore,"dotnet-device-service",context.Response.StatusCode,app.Logger,context.RequestAborted);
+});
 var applyMigrations = builder.Configuration.GetValue<bool>("APPLY_DATABASE_MIGRATIONS");
 var migrationOnly = builder.Configuration.GetValue<bool>("MIGRATION_ONLY");
 if (migrationOnly && !applyMigrations)

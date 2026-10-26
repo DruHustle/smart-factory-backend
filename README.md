@@ -37,3 +37,7 @@ For live AAS acceptance, use the local BaSyx profile and `AAS_LIVE_TESTS=true do
 ### Optional Smart Factory equipment provenance
 
 TelemetryService accepts an optional `integration` object on the existing MQTT payload and persists it as `IntegrationJson`, unchanged through bridge retries. It carries explicit live/simulated/replay mode, UTC gateway receipt time, source quality/connection, session/sequence and scenario/replay identity. Simulated/replay data remains classified even over real MQTT. Legacy payloads retain their previous ingestion identity and local monitoring behavior. Apply `deploy/migrations/20261025_onesa_provenance.sql` before deploying the updated worker; `--migrate` includes it. No Onesa service or credential is required by this worker. The dashboard owns local 3D and the optional outbound adapter; no new MQTT subscriber or poller is introduced. Native model storage and rendering remain within the dashboard repository.
+
+## Native OT security evidence
+
+See [the service observation boundary](docs/cybersecurity.md) for sanitized actual access decisions, durable delivery, limits and current Oracle release procedure.

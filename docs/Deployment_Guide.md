@@ -1,3 +1,5 @@
+> Current production hosting: Oracle ARM64 API plus singleton worker, with a separate Vercel UI. Use the frontend checkout's `deploy/oracle/README.md` for current releases. The Render material below is historical rollback context; its production workflow remains disabled. See [native cybersecurity evidence](cybersecurity.md) for this additive release.
+
 # Backend deployment
 
 Production AAS is a separate Oracle Cloud Ubuntu ARM64 VM. Provision it with `deploy/terraform/oracle-basyx`, then deploy `deploy/oracle-basyx` on that host. The Compose stack runs six BaSyx Go 1.1.0 components, a client-credentials token service, and Caddy; only HTTPS is public and component ports bind to loopback. BaSyx persists to the dedicated Aiven `basyx` database. Run the configuration container once before starting the long-lived services, then configure Render's AAS URLs and token endpoint to the Caddy paths. Keep database/OAuth values only in the VM's untracked `.env`; they are intentionally excluded from Terraform state.
