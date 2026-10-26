@@ -107,6 +107,15 @@ namespace SmartFactory.Services.TelemetryService.Infrastructure.Services
                         await e.AcknowledgeAsync(stoppingToken);
                         return;
                     }
+                    if (e.ApplicationMessage.Retain && data.Integration is not null)
+                    {
+                        var wire = System.Text.Json.Nodes.JsonNode.Parse(message);
+                        if (wire is System.Text.Json.Nodes.JsonObject envelope && envelope.FirstOrDefault(item => string.Equals(item.Key, "integration", StringComparison.OrdinalIgnoreCase)).Value is System.Text.Json.Nodes.JsonObject provenance)
+                        {
+                            provenance["retained"] = true;
+                            message = wire.ToJsonString();
+                        }
+                    }
                     var persisted = await scope.ServiceProvider.GetRequiredService<TelemetryFunction>().Run(message);
                     if (persisted is null)
                         _logger.LogWarning("Rejected invalid telemetry for device {DeviceId}.", data.DeviceId);

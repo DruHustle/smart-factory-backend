@@ -12,6 +12,7 @@ namespace SmartFactory.Services.TelemetryService.Infrastructure.Data
         {
             var telemetry = modelBuilder.Entity<TelemetryRecord>();
             telemetry.HasIndex(record => record.IngestionId).IsUnique();
+            telemetry.Property(record => record.DeliveryErrorCode).HasMaxLength(128);
             telemetry.Property(record => record.SensorType).HasMaxLength(64);
             telemetry.Property(record => record.SensorStatus).HasMaxLength(16);
         }

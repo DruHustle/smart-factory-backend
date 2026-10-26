@@ -3,6 +3,7 @@ namespace SmartFactory.Services.TelemetryService.Domain.Entities
     public class TelemetryRecord
     {
         public int Id { get; set; }
+        public string? IntegrationJson { get; set; }
         public string DeviceId { get; set; } = string.Empty;
         public string? GatewayId { get; set; }
         public string? AssetId { get; set; }
@@ -13,6 +14,8 @@ namespace SmartFactory.Services.TelemetryService.Domain.Entities
         public DateTime? DashboardForwardedAt { get; set; }
         public DateTime? NextDeliveryAttemptAt { get; set; }
         public int DeliveryAttempts { get; set; }
+        public DateTime? DeliveryQuarantinedAt { get; set; }
+        public string? DeliveryErrorCode { get; set; }
         public double? Temperature { get; set; }
         public double? Humidity { get; set; }
         public double? Vibration { get; set; }

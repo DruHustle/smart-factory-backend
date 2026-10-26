@@ -53,3 +53,11 @@ DROP INDEX IF EXISTS "IX_TelemetryRecords_PendingDelivery";
 CREATE INDEX "IX_TelemetryRecords_PendingDelivery"
   ON "TelemetryRecords" ("NextDeliveryAttemptAt", "Id")
   WHERE "IngestionId" IS NOT NULL AND "DashboardForwardedAt" IS NULL;
+
+-- Optional provenance must exist even when the local worker starts without --migrate.
+ALTER TABLE "TelemetryRecords" ADD COLUMN IF NOT EXISTS "IntegrationJson" text NULL;
+
+-- Permanent validation failures remain visible, never falsely acknowledged.
+ALTER TABLE "TelemetryRecords" ADD COLUMN IF NOT EXISTS "DeliveryQuarantinedAt" timestamp with time zone NULL;
+ALTER TABLE "TelemetryRecords" ADD COLUMN IF NOT EXISTS "DeliveryErrorCode" varchar(128) NULL;
+CREATE INDEX IF NOT EXISTS "IX_TelemetryRecords_Deliverable" ON "TelemetryRecords" ("NextDeliveryAttemptAt", "Id") WHERE "DashboardForwardedAt" IS NULL AND "DeliveryQuarantinedAt" IS NULL;

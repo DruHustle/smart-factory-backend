@@ -37,6 +37,7 @@ namespace SmartFactory.Services.TelemetryService
         {
             // Invalid messages are permanent rejects. Infrastructure failures must
             // propagate so the MQTT subscriber does not acknowledge lost records.
+            if (System.Text.Encoding.UTF8.GetByteCount(message)>16*1024) return null;
             TelemetryData? data;
             try { data = JsonSerializer.Deserialize<TelemetryData>(message, new JsonSerializerOptions { PropertyNameCaseInsensitive = true }); }
             catch (JsonException) { return null; }
@@ -48,12 +49,21 @@ namespace SmartFactory.Services.TelemetryService
                 data.Temperature, data.Humidity, data.Vibration, data.Power, data.Pressure, data.Rpm,
                 AssetSignals = data.AssetSignals is null ? null : new SortedDictionary<string, double>(data.AssetSignals, StringComparer.Ordinal),
             };
-            var ingestionId = Convert.ToHexString(SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(normalized))).ToLowerInvariant();
-            var record = await _dbContext.TelemetryRecords.FirstOrDefaultAsync(item => item.IngestionId == ingestionId);
+            TelemetryProvenance.TryNormalize(data.Integration,out var provenance,out _);
+            var originalBytes = data.Integration is null || data.Integration.Value.ValueKind == JsonValueKind.Null
+                ? JsonSerializer.SerializeToUtf8Bytes(normalized)
+                : JsonSerializer.SerializeToUtf8Bytes(new { Legacy = normalized, data.Integration });
+            var oldIngestionId=Convert.ToHexString(SHA256.HashData(originalBytes)).ToLowerInvariant();
+            data.Integration=provenance;
+            var identityBytes=provenance is null ? JsonSerializer.SerializeToUtf8Bytes(normalized) : JsonSerializer.SerializeToUtf8Bytes(new { Legacy=normalized,data.Integration });
+            var ingestionId = Convert.ToHexString(SHA256.HashData(identityBytes)).ToLowerInvariant();
+            // Preserve an existing pre-policy ingestion identity on a redelivery.
+            var record = await _dbContext.TelemetryRecords.FirstOrDefaultAsync(item => item.IngestionId == ingestionId || item.IngestionId == oldIngestionId);
             if (record is null)
             {
                 record = new TelemetryRecord
                 {
+                    IntegrationJson = data.Integration?.GetRawText(),
                     DeviceId = data.DeviceId, GatewayId = data.GatewayId, AssetId = data.AssetId,
                     SensorType = data.SensorType, SensorStatus = data.SensorStatus,
                     AssetSignalsJson = data.AssetSignals is null ? null : JsonSerializer.Serialize(data.AssetSignals),
@@ -77,12 +87,13 @@ namespace SmartFactory.Services.TelemetryService
 
         public static bool ValidTelemetry(TelemetryData data)
         {
+            if (!TelemetryProvenance.TryNormalize(data.Integration,out _,out _)) return false;
             const double MaxMetricMagnitude = 1_000_000_000;
             // Arduino millis() and several industrial counters are unsigned
             // 32-bit values. Keep named signals bounded without rejecting a
             // healthy arm after roughly 11.6 days of uptime.
             const double MaxNamedSignalMagnitude = uint.MaxValue;
-            static bool SafeId(string value) => Regex.IsMatch(value, "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$", RegexOptions.CultureInvariant);
+            static bool SafeId(string value) => value is not null && Regex.IsMatch(value, "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$", RegexOptions.CultureInvariant);
             if (!SafeId(data.DeviceId) || (data.GatewayId is not null && !SafeId(data.GatewayId)) ||
                 (data.AssetId is not null && (data.AssetId.Length is 0 or > 128 || data.AssetId.Any(char.IsControl))) ||
                 data.Timestamp is null or <= 0 || data.Timestamp > DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() + 300_000) return false;
@@ -100,6 +111,17 @@ namespace SmartFactory.Services.TelemetryService
             return true;
         }
 
+        // 404/409 may resolve after deployment/concurrency recovery. A timeout
+        // gives no evidence whether the receiver committed; retry the same ID.
+        public static string ClassifyDelivery(int status) => status switch {
+            >=200 and <300 => "accepted",
+            400 or 413 or 415 or 422 => "payload",
+            401 or 403 => "credentials",
+            404 or 408 or 409 or 423 or 425 or 428 or 429 => "transient",
+            >=500 => "transient",
+            _ => "configuration"
+        };
+
         public async Task DrainPendingAsync(CancellationToken cancellationToken)
         {
             var now = DateTime.UtcNow;
@@ -107,7 +129,7 @@ namespace SmartFactory.Services.TelemetryService
             if (!bridgeEnabled) return;
             var records = await _dbContext.TelemetryRecords.Where(record => record.IngestionId != null &&
                 (record.NextDeliveryAttemptAt == null || record.NextDeliveryAttemptAt <= now) &&
-                record.DashboardForwardedAt == null)
+                record.DashboardForwardedAt == null && record.DeliveryQuarantinedAt == null)
                 .OrderBy(record => record.NextDeliveryAttemptAt).ThenBy(record => record.Id).Take(100).ToListAsync(cancellationToken);
             foreach (var record in records) await DeliverAsync(record, cancellationToken);
         }
@@ -121,10 +143,20 @@ namespace SmartFactory.Services.TelemetryService
                 await _dbContext.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock(hashtext({record.IngestionId}))", cancellationToken);
                 await _dbContext.Entry(record).ReloadAsync(cancellationToken);
             }
+            if (record.DeliveryQuarantinedAt is not null || record.DashboardForwardedAt is not null) return;
+            string? quarantine = null;
             var failed = false;
+            double? retryAfterSeconds=null;
+            if(record.IntegrationJson is not null){
+                try{
+                    using var metadata=JsonDocument.Parse(record.IntegrationJson);
+                    if(!TelemetryProvenance.TryNormalize(metadata.RootElement,out var canonical,out _))quarantine="historical_provenance_validation";
+                    else record.IntegrationJson=canonical?.GetRawText();
+                }catch(JsonException){quarantine="historical_provenance_validation";}
+            }
             var sinkUrl = Environment.GetEnvironmentVariable("INTERNAL_TELEMETRY_SINK_URL");
             var token = Environment.GetEnvironmentVariable("INGESTION_API_TOKEN");
-            if (!string.IsNullOrWhiteSpace(sinkUrl) && record.DashboardForwardedAt is null)
+            if (quarantine is null && !string.IsNullOrWhiteSpace(sinkUrl) && record.DashboardForwardedAt is null)
             {
                 try
                 {
@@ -133,6 +165,7 @@ namespace SmartFactory.Services.TelemetryService
                     {
                         Content = JsonContent.Create(new
                         {
+                            integration = record.IntegrationJson is null ? (JsonElement?)null : JsonSerializer.Deserialize<JsonElement>(record.IntegrationJson),
                             deviceId = record.DeviceId, gatewayId = record.GatewayId, assetId = record.AssetId,
                             sensorType = record.SensorType, sensorStatus = record.SensorStatus,
                             assetSignals = record.AssetSignalsJson is null ? null : JsonSerializer.Deserialize<Dictionary<string, double>>(record.AssetSignalsJson),
@@ -143,17 +176,30 @@ namespace SmartFactory.Services.TelemetryService
                     };
                     request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
                     using var response = await _httpClientFactory.CreateClient("dashboard-ingestion").SendAsync(request, cancellationToken);
-                    response.EnsureSuccessStatusCode();
-                    record.DashboardForwardedAt = DateTime.UtcNow;
+                    var retry=response.Headers.RetryAfter;
+                    retryAfterSeconds=retry?.Delta?.TotalSeconds ?? (retry?.Date-DateTimeOffset.UtcNow)?.TotalSeconds;
+                    var status=(int)response.StatusCode;
+                    var category=ClassifyDelivery(status);
+                    if(category=="accepted") {record.DashboardForwardedAt=DateTime.UtcNow;record.DeliveryErrorCode=null;}
+                    else if(category=="payload" || category=="credentials" || category=="configuration")quarantine=$"receiver_{category}_{status}";
+                    else {failed=true;record.DeliveryErrorCode=$"receiver_transient_{status}";}
                 }
-                catch (Exception error) when (error is not OperationCanceledException)
+                catch (Exception error) when (error is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
                 {
                     failed = true;
+                    record.DeliveryErrorCode="transport_unconfirmed";
                     _logger.LogWarning("Dashboard delivery pending for telemetry record {RecordId}.", record.Id);
                 }
             }
             record.DeliveryAttempts += 1;
-            record.NextDeliveryAttemptAt = failed ? DateTime.UtcNow.AddSeconds(Math.Min(300, Math.Pow(2, Math.Min(record.DeliveryAttempts, 8)))) : null;
+            if(failed && record.DeliveryAttempts>=12)quarantine="transient_retry_exhausted";
+            if(quarantine is not null){
+                record.DeliveryQuarantinedAt=DateTime.UtcNow;
+                record.DeliveryErrorCode=quarantine;
+                failed=false;
+                _logger.LogWarning("Telemetry delivery record {RecordId} quarantined ({Code}); not acknowledged by receiver.",record.Id,quarantine);
+            }
+            record.NextDeliveryAttemptAt = failed ? DateTime.UtcNow.AddSeconds(Math.Clamp(retryAfterSeconds ?? Math.Pow(2, Math.Min(record.DeliveryAttempts, 8)), 1, 300)) : null;
             await _dbContext.SaveChangesAsync(cancellationToken);
             if (transaction is not null) await transaction.CommitAsync(cancellationToken);
         }
