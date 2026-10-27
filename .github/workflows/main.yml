@@ -31,5 +31,23 @@ jobs:
       - name: Audit all NuGet dependencies
         run: dotnet restore src/SmartFactory.sln -p:NuGetAudit=true -p:NuGetAuditMode=all -p:NuGetAuditLevel=high -warnaserror:NU1900,NU1903,NU1904 --force-evaluate
       - run: dotnet test src/SmartFactory.sln -c Release --no-restore
+  standalone-images:
+    name: Standalone ${{ matrix.service }} image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [IdentityService, DeviceService, TelemetryService, AnalyticsService, NotificationService]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with: { persist-credentials: false }
+      - name: Build supported runtime image
+        env:
+          SERVICE: ${{ matrix.service }}
+        run: |
+          docker build --file "src/Services/$SERVICE/Dockerfile" --tag standalone-qualified:local .
+          test "$(docker image inspect standalone-qualified:local --format '{{.Config.User}}')" = app
+          docker run --rm --entrypoint dotnet standalone-qualified:local --list-runtimes
 # The dashboard owns coordinated disposable qualification and immutable image identity.
 # Oracle backend promotion is manual; Vercel promotion additionally verifies API compatibility.

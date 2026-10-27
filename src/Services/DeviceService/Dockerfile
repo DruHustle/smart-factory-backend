@@ -22,7 +22,7 @@ EXPOSE 8080
 EXPOSE 443
 
 # Create a non-root user for running the application (Security Best Practice)
-RUN adduser --disabled-password --gecos "" appuser
+RUN id app
 
 # ----------------------------------------
 # Stage 2: Build Stage
@@ -69,10 +69,10 @@ WORKDIR /app
 COPY --from=publish /app/publish .
 
 # Set ownership to non-root user
-RUN chown -R appuser:appuser /app
+RUN chown -R app:app /app
 
 # Switch to non-root user (Security Best Practice)
-USER appuser
+USER app
 
 # Configure health check for Kubernetes liveness/readiness probes
 # Assumes the service exposes a /health endpoint (Single Responsibility Principle)
