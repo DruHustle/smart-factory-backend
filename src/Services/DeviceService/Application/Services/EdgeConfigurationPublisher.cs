@@ -1,4 +1,5 @@
 using System.Text;
+using SmartFactory.Contracts;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.Extensions.Hosting;
@@ -39,9 +40,9 @@ public sealed class EdgeConfigurationPublisher(IConfiguration configuration, IHo
         var line = configuration["EDGE_LINE_ID"] ?? "line-1";
         if (!SafeTopicPart.IsMatch(site) || !SafeTopicPart.IsMatch(line)) throw new InvalidOperationException("EDGE_SITE_ID and EDGE_LINE_ID must be safe MQTT topic segments.");
         var topicTemplate = configuration["EDGE_COMMAND_TOPIC_TEMPLATE"] ?? "factory/{site}/{line}/{device}/commands";
-        var topic = topicTemplate.Replace("{site}", site, StringComparison.Ordinal)
-            .Replace("{line}", line, StringComparison.Ordinal).Replace("{device}", request.GatewayDeviceId, StringComparison.Ordinal);
-        if (topic.Contains('{') || topic.Contains('}') || topic.Contains('+') || topic.Contains('#')) throw new InvalidOperationException("MQTT command topic template is invalid.");
+        var topic = topicTemplate.Replace("{site}", TopicIdentity.Encode(site), StringComparison.Ordinal)
+            .Replace("{line}", TopicIdentity.Encode(line), StringComparison.Ordinal).Replace("{device}", TopicIdentity.Encode(request.GatewayDeviceId), StringComparison.Ordinal);
+        if (topic.Contains('{') || topic.Contains('}') || topic.Contains('+') || topic.Contains('#') || Encoding.UTF8.GetByteCount(topic)>255) throw new InvalidOperationException("MQTT command topic template is invalid.");
 
         var command = BuildConfigurationCommand(request);
         if (command.Length > 64 * 1024) throw new ArgumentException("Edge configuration exceeds the 64 KB MQTT message limit.");
@@ -120,7 +121,7 @@ public sealed class EdgeConfigurationPublisher(IConfiguration configuration, IHo
         var site = configuration["EDGE_SITE_ID"] ?? "factory-a";
         var line = configuration["EDGE_LINE_ID"] ?? "line-1";
         if (!SafeTopicPart.IsMatch(site) || !SafeTopicPart.IsMatch(line)) throw new InvalidOperationException("EDGE_SITE_ID and EDGE_LINE_ID must be safe MQTT topic segments.");
-        var topic = $"factory/{site}/{line}/{request.GatewayDeviceId}/commands";
+        var topic = TopicIdentity.Build(site,line,request.GatewayDeviceId,"commands");
         var command = BuildAda031ControlCommand(request);
 
         var factory = new MqttFactory();
@@ -161,7 +162,7 @@ public sealed class EdgeConfigurationPublisher(IConfiguration configuration, IHo
         var site = configuration["EDGE_SITE_ID"] ?? "factory-a";
         var line = configuration["EDGE_LINE_ID"] ?? "line-1";
         if (!SafeTopicPart.IsMatch(site) || !SafeTopicPart.IsMatch(line)) throw new InvalidOperationException("EDGE_SITE_ID and EDGE_LINE_ID must be safe MQTT topic segments.");
-        var topic = $"factory/{site}/{line}/{request.GatewayDeviceId}/commands";
+        var topic = TopicIdentity.Build(site,line,request.GatewayDeviceId,"commands");
         var command = JsonSerializer.SerializeToUtf8Bytes(new
         {
             schemaVersion = request.SchemaVersion,

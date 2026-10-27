@@ -70,7 +70,7 @@ namespace SmartFactory.Services.TelemetryService
                     MappingJson = data.Mapping is null ? null : JsonSerializer.Serialize(new SortedDictionary<string,TelemetryMapping>(data.Mapping,StringComparer.Ordinal)),
                     UnitsJson = data.Units is null ? null : JsonSerializer.Serialize(new SortedDictionary<string,string>(data.Units,StringComparer.Ordinal)),
                     TransportRetained = data.TransportRetained,
-                    TransportRetainVerified=data.TransportRetainVerified,
+                    TransportRetainVerified=data.TransportRetainVerified==true,
                     AcceptedAt = DateTime.UtcNow,
                     DeviceId = data.DeviceId, GatewayId = data.GatewayId, AssetId = data.AssetId,
                     SensorType = data.SensorType, SensorStatus = data.SensorStatus,

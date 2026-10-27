@@ -3,6 +3,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using MQTTnet;
+using SmartFactory.Contracts;
 using MQTTnet.Client;
 using MQTTnet.Protocol;
 using MQTTnet.Formatter;
@@ -96,14 +97,14 @@ namespace SmartFactory.Services.TelemetryService.Infrastructure.Services
                     if(!CompatibleTopic(parts)) { _logger.LogWarning("Rejected MQTT topic outside the compatible identity contract.");await e.AcknowledgeAsync(stoppingToken);return; }
                     if (parts.Length == 5 && parts[0] == "factory" && parts[4] == "heartbeat")
                     {
-                        await ForwardHeartbeatAsync(scope.ServiceProvider, parts[3], message, e.ApplicationMessage.Retain, IsSubscriptionReady, stoppingToken);
+                        await ForwardHeartbeatAsync(scope.ServiceProvider, TopicIdentity.Decode(parts[3]), message, e.ApplicationMessage.Retain, IsSubscriptionReady, stoppingToken);
                         await e.AcknowledgeAsync(stoppingToken);
                         return;
                     }
                     var data = System.Text.Json.JsonSerializer.Deserialize<SmartFactory.Services.TelemetryService.Application.DTOs.TelemetryData>(message,
                         new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
                     if (e.ApplicationMessage.PayloadSegment.Count > 16 * 1024 || parts.Length != 5 || parts[0] != "factory" ||
-                        parts[4] != "telemetry" || data is null || parts[3] != data.DeviceId)
+                        parts[4] != "telemetry" || data is null || TopicIdentity.Decode(parts[3]) != data.DeviceId)
                     {
                         _logger.LogWarning("Rejected telemetry whose identity does not match its MQTT topic.");
                         await e.AcknowledgeAsync(stoppingToken);
@@ -113,7 +114,9 @@ namespace SmartFactory.Services.TelemetryService.Infrastructure.Services
                     data.TransportRetained=data.TransportRetained || e.ApplicationMessage.Retain;
                     // Deliveries queued under an earlier subscription may have lost
                     // their original retain flag. Store them without asserting current state.
-                    data.TransportRetainVerified=IsSubscriptionReady;
+                    data.TransportRetainVerified=IsSubscriptionReady &&
+                        (!string.IsNullOrEmpty(data.GatewayId)&&data.GatewayId!=data.DeviceId
+                            ? data.TransportRetainVerified==true : data.TransportRetainVerified!=false);
                     message=JsonSerializer.Serialize(data,new JsonSerializerOptions {PropertyNamingPolicy=JsonNamingPolicy.CamelCase});
                     var persisted = await scope.ServiceProvider.GetRequiredService<TelemetryFunction>().Run(message);
                     if (persisted is null)
@@ -191,7 +194,7 @@ namespace SmartFactory.Services.TelemetryService.Infrastructure.Services
             await base.StopAsync(cancellationToken);
         }
 
-        public static bool CompatibleTopic(string[] parts) => parts.Length==5 && parts[0]=="factory" && parts[4] is "telemetry" or "heartbeat" && parts.Skip(1).Take(3).All(p=>Regex.IsMatch(p,"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$",RegexOptions.CultureInvariant));
+        public static bool CompatibleTopic(string[] parts) => parts.Length==5 && parts[0]=="factory" && parts[4] is "telemetry" or "heartbeat" && parts.Skip(1).Take(3).All(p=>TopicIdentity.TryDecode(p,out _)) && System.Text.Encoding.UTF8.GetByteCount(string.Join("/",parts))<=255;
 
         private async Task ForwardHeartbeatAsync(IServiceProvider services, string topicDeviceId, string message, bool retained, bool retainVerified, CancellationToken cancellationToken)
         {
@@ -219,7 +222,10 @@ namespace SmartFactory.Services.TelemetryService.Infrastructure.Services
             var heartbeatSink = new UriBuilder(sink) { Path = sink.AbsolutePath[..^"telemetry".Length] + "heartbeat", Query = "", Fragment = "" }.Uri;
             using var request = new HttpRequestMessage(HttpMethod.Post, heartbeatSink);
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
-            request.Content = JsonContent.Create(new { deviceId = topicDeviceId, timestamp, status = state.GetString(), transportRetained=retained,transportRetainVerified=retainVerified });
+            var upstreamVerified=!root.TryGetProperty("transportRetainVerified",out var verified) || verified.ValueKind==JsonValueKind.True;
+            if(root.TryGetProperty("gatewayId",out var gateway)&&gateway.ValueKind==JsonValueKind.String&&gateway.GetString()!=topicDeviceId)
+                upstreamVerified=root.TryGetProperty("transportRetainVerified",out verified)&&verified.ValueKind==JsonValueKind.True;
+            request.Content = JsonContent.Create(new { deviceId = topicDeviceId, timestamp, status = state.GetString(), transportRetained=retained,transportRetainVerified=retainVerified&&upstreamVerified });
             using var client = services.GetRequiredService<IHttpClientFactory>().CreateClient("dashboard-ingestion");
             using var response = await client.SendAsync(request, cancellationToken);
             if (response.StatusCode == HttpStatusCode.NotFound)

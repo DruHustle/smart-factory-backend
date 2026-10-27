@@ -27,6 +27,9 @@ public class TrustedTelemetryContractTests
     [Theory]
     [InlineData("factory/site:01/line.01/sensor.temp:01/telemetry",true)]
     [InlineData("factory/a/b/c/heartbeat",true)]
+    [InlineData("factory/site:01/line%2E01/sensor%2Etemp:01/telemetry",true)]
+    [InlineData("factory/a/b/sensor%2Fbad/telemetry",false)]
+    [InlineData("factory/a/b/sensor%252Ebad/telemetry",false)]
     [InlineData("factory/bad#site/b/c/telemetry",false)]
     [InlineData("factory/a/b/c/commands",false)]
     public void ValidatesEveryTopicIdentity(string topic,bool valid) => Assert.Equal(valid,SmartFactory.Services.TelemetryService.Infrastructure.Services.MqttTelemetrySubscriberService.CompatibleTopic(topic.Split('/')));

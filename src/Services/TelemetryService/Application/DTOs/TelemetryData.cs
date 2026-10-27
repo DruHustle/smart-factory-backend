@@ -7,7 +7,7 @@ namespace SmartFactory.Services.TelemetryService.Application.DTOs
         public Dictionary<string, TelemetryMapping>? Mapping { get; set; }
         public Dictionary<string, string>? Units { get; set; }
         public bool TransportRetained { get; set; }
-        public bool TransportRetainVerified { get; set; }
+        public bool? TransportRetainVerified { get; set; }
         public string DeviceId { get; set; } = string.Empty;
         public string? GatewayId { get; set; }
         public string? AssetId { get; set; }

@@ -29,10 +29,10 @@ public sealed class WorkerStatusService(IServiceScopeFactory scopes,IHttpClientF
                     var hash=await TelemetryMigrations.HashAsync(file);
                     if(Array.IndexOf(applied,hash)<0)throw new InvalidOperationException("Worker schema identity unavailable.");
                 }
-                var metrics=await db.TelemetryRecords.GroupBy(r=>1).Select(g=>new {
+                var metrics=await db.TelemetryRecords.Where(r=>r.IngestionId!=null&&r.DashboardForwardedAt==null).GroupBy(r=>1).Select(g=>new {
                     pending=g.Count(r=>r.DashboardForwardedAt==null&&r.DeliveryQuarantinedAt==null),
                     quarantined=g.Count(r=>r.DeliveryQuarantinedAt!=null),
-                    failedAttempts=g.Count(r=>r.DashboardForwardedAt==null&&r.DeliveryAttempts>0),
+                    failedAttempts=g.Count(r=>r.DeliveryQuarantinedAt==null&&r.DeliveryAttempts>0),
                     oldestPendingAt=g.Where(r=>r.DashboardForwardedAt==null&&r.DeliveryQuarantinedAt==null).Min(r=>r.AcceptedAt),
                 }).SingleOrDefaultAsync(cancellation);
                 var source=Environment.GetEnvironmentVariable("BACKEND_SOURCE_REVISION");
