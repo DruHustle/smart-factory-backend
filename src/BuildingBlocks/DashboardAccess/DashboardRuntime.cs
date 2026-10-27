@@ -20,10 +20,11 @@ public sealed class DashboardStore : IDisposable
             throw new InvalidOperationException("Dashboard PostgreSQL requires VerifyFull TLS in production.");
         settings.Timeout = 5;
         settings.CommandTimeout = 15;
-        // Aiven's small production plan has 20 total slots shared by every
-        // service and by both sides of a rolling deployment.
-        settings.MaxPoolSize = 2;
+        // Budget every process together with the six BaSyx services. The Free
+        // Aiven instance has 20 slots; the complete steady-state budget is 15.
+        settings.MaxPoolSize = 1;
         settings.MinPoolSize = 0;
+        settings.ConnectionIdleLifetime = 30;
         Source = NpgsqlDataSource.Create(settings.ConnectionString);
     }
     public async Task<DashboardUser?> GetUser(int id, CancellationToken ct)

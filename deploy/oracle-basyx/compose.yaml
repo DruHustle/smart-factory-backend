@@ -7,7 +7,8 @@ x-basyx-database: &basyx-database
   POSTGRES_PASSWORD: ${BASYX_PASSWORD:?BASYX_PASSWORD is required}
   POSTGRES_DBNAME: ${POSTGRES_DBNAME:-basyx}
   POSTGRES_SSLMODE: require
-  POSTGRES_MAXOPENCONNECTIONS: 3
+  # Six independent pools share the same 20-slot Free instance with Node/.NET.
+  POSTGRES_MAXOPENCONNECTIONS: 1
   POSTGRES_MAXIDLECONNECTIONS: 1
 
 services:

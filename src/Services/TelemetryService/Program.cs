@@ -76,6 +76,7 @@ var host = Host.CreateDefaultBuilder(args)
         }
 
         services.AddTransient<TelemetryFunction>();
+        services.AddSingleton<TelemetryDeliveryWakeup>();
         services.AddHostedService<TelemetryOutboxService>();
         services.AddHostedService<WorkerStatusService>();
         services.AddHttpClient("dashboard-ingestion", client => client.Timeout = TimeSpan.FromSeconds(10)).ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });

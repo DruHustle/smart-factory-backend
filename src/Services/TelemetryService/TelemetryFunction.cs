@@ -9,6 +9,7 @@ using Microsoft.Extensions.Logging;
 using SmartFactory.Services.TelemetryService.Application.DTOs;
 using SmartFactory.Services.TelemetryService.Domain.Entities;
 using SmartFactory.Services.TelemetryService.Infrastructure.Data;
+using SmartFactory.Services.TelemetryService.Infrastructure.Services;
 
 namespace SmartFactory.Services.TelemetryService
 {
@@ -17,15 +18,18 @@ namespace SmartFactory.Services.TelemetryService
         private readonly ILogger _logger;
         private readonly TelemetryDbContext _dbContext;
         private readonly IHttpClientFactory? _httpClientFactory;
+        private readonly TelemetryDeliveryWakeup? _deliveryWakeup;
 
         public TelemetryFunction(
             ILoggerFactory loggerFactory,
             TelemetryDbContext dbContext,
-            IHttpClientFactory? httpClientFactory = null)
+            IHttpClientFactory? httpClientFactory = null,
+            TelemetryDeliveryWakeup? deliveryWakeup = null)
         {
             _logger = loggerFactory.CreateLogger<TelemetryFunction>();
             _dbContext = dbContext;
             _httpClientFactory = httpClientFactory;
+            _deliveryWakeup = deliveryWakeup;
         }
 
         public Task<TelemetryRecord?> Run(string message)
@@ -90,6 +94,8 @@ namespace SmartFactory.Services.TelemetryService
             // durable and the outbox worker retries them after outages/restarts.
             // Delivery runs independently: a slow sink must not delay MQTT
             // acknowledgement or receipt of the next durable sample.
+            if (record.DashboardForwardedAt is null && record.DeliveryQuarantinedAt is null)
+                _deliveryWakeup?.Notify();
             return record;
         }
 
@@ -141,16 +147,17 @@ namespace SmartFactory.Services.TelemetryService
             _ => "configuration"
         };
 
-        public async Task DrainPendingAsync(CancellationToken cancellationToken)
+        public async Task<int> DrainPendingAsync(CancellationToken cancellationToken)
         {
             var now = DateTime.UtcNow;
             var bridgeEnabled = !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("INTERNAL_TELEMETRY_SINK_URL"));
-            if (!bridgeEnabled) return;
+            if (!bridgeEnabled) return 0;
             var records = await _dbContext.TelemetryRecords.Where(record => record.IngestionId != null &&
                 (record.NextDeliveryAttemptAt == null || record.NextDeliveryAttemptAt <= now) &&
                 record.DashboardForwardedAt == null && record.DeliveryQuarantinedAt == null)
                 .OrderBy(record => record.NextDeliveryAttemptAt).ThenBy(record => record.Id).Take(100).ToListAsync(cancellationToken);
             foreach (var record in records) await DeliverAsync(record, cancellationToken);
+            return records.Count;
         }
 
         private async Task DeliverAsync(TelemetryRecord record, CancellationToken cancellationToken = default)
