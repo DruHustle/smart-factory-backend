@@ -29,6 +29,11 @@ For live AAS acceptance, use the local BaSyx profile and `AAS_LIVE_TESTS=true do
 
 ## Runtime limits
 
+The [Free-instance memory budget](docs/free-instance-memory.md) documents the
+15-connection application candidate, queue idle backoff, database memory
+settings, verification and rollback. Apply the BaSyx and application changes
+together; every database shares the same Aiven instance limit.
+
 The candidate targets .NET 10 LTS with the pinned SDK/runtime and compatible packages; see [qualification](docs/net10-qualification.md) and [Microsoft support policy](https://dotnet.microsoft.com/en-us/platform/support/policy/dotnet-core). .NET 8 reaches end of support on 10 November 2026. Telemetry has one stable persistent MQTT identity, so Oracle worker deployments must stop the previous container before starting its replacement. Factory downtime is explicitly confirmed by technicians/admins; missing telemetry does not prove downtime. Provider acceptance does not prove mailbox delivery. No automatic firmware OTA receiver exists in the current edge release.
 
 [API contracts](API-SPEC.md), [architecture](ARCHITECTURE.md), [troubleshooting](docs/Troubleshooting.md), and [AASX/edge configuration](docs/AASX-and-Edge-Configuration.md) describe supported workflows. Legacy Kubernetes/Cloudflare/ACR artifacts are historical references outside the selected production release.

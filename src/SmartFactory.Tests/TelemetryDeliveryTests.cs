@@ -42,10 +42,11 @@ public sealed class TelemetryDeliveryTests
                 var function = new TelemetryFunction(new LoggerFactory(), db, factory.Object);
                 Assert.NotNull(await function.Run(Message()));
                 Assert.Empty(handler.Payloads);
-                await function.DrainPendingAsync(default);
+                Assert.Equal(1, await function.DrainPendingAsync(default));
                 var saved = Assert.Single(db.TelemetryRecords);
                 Assert.Null(saved.DashboardForwardedAt);
                 Assert.NotNull(saved.NextDeliveryAttemptAt);
+                Assert.Equal(0, await function.DrainPendingAsync(default));
                 saved.NextDeliveryAttemptAt = DateTime.UtcNow.AddSeconds(-1);
                 await db.SaveChangesAsync();
             }

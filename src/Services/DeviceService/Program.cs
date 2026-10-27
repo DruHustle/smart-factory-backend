@@ -51,7 +51,7 @@ var connectionString = builder.Configuration.GetConnectionString("DefaultConnect
 if (!string.IsNullOrWhiteSpace(connectionString))
 {
     connectionString = ValidatePostgresTls(connectionString, builder.Environment.IsProduction());
-    var pooledConnection = new NpgsqlConnectionStringBuilder(connectionString) { MaxPoolSize = 2, MinPoolSize = 0 };
+    var pooledConnection = new NpgsqlConnectionStringBuilder(connectionString) { MaxPoolSize = 1, MinPoolSize = 0, ConnectionIdleLifetime = 30 };
     connectionString = pooledConnection.ConnectionString;
     builder.Services.AddDbContext<DeviceDbContext>(options => options.UseNpgsql(connectionString));
 }

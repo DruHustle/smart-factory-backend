@@ -6,13 +6,17 @@ public sealed class NotificationDeliveryWorker(DashboardStore store, IServiceSco
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        var delaySeconds = 5;
         while (!stoppingToken.IsCancellationRequested) {
             try {
                 using var scope = scopes.CreateScope();
                 var sender = scope.ServiceProvider.GetRequiredService<IEmailSender>();
-                if (!await DeliverOne(sender, stoppingToken)) await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken);
+                if (await DeliverOne(sender, stoppingToken)) { delaySeconds = 5; continue; }
             } catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { break; }
-            catch { logger.LogWarning("Notification queue unavailable; delivery will retry."); await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken); }
+            catch { logger.LogWarning("Notification queue unavailable; delivery will retry."); }
+            try { await Task.Delay(TimeSpan.FromSeconds(delaySeconds), stoppingToken); }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { break; }
+            delaySeconds = Math.Min(30, delaySeconds * 2);
         }
     }
     public async Task<bool> DeliverOne(IEmailSender sender, CancellationToken ct)
