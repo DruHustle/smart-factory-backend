@@ -92,9 +92,10 @@ namespace SmartFactory.Services.TelemetryService.Infrastructure.Services
                 {
                     using var scope = _serviceProvider.CreateScope();
                     var parts = e.ApplicationMessage.Topic.Split('/');
+                    if(!CompatibleTopic(parts)) { _logger.LogWarning("Rejected MQTT topic outside the compatible identity contract.");await e.AcknowledgeAsync(stoppingToken);return; }
                     if (parts.Length == 5 && parts[0] == "factory" && parts[4] == "heartbeat")
                     {
-                        await ForwardHeartbeatAsync(scope.ServiceProvider, parts[3], message, stoppingToken);
+                        await ForwardHeartbeatAsync(scope.ServiceProvider, parts[3], message, e.ApplicationMessage.Retain, stoppingToken);
                         await e.AcknowledgeAsync(stoppingToken);
                         return;
                     }
@@ -107,15 +108,9 @@ namespace SmartFactory.Services.TelemetryService.Infrastructure.Services
                         await e.AcknowledgeAsync(stoppingToken);
                         return;
                     }
-                    if (e.ApplicationMessage.Retain && data.Integration is not null)
-                    {
-                        var wire = System.Text.Json.Nodes.JsonNode.Parse(message);
-                        if (wire is System.Text.Json.Nodes.JsonObject envelope && envelope.FirstOrDefault(item => string.Equals(item.Key, "integration", StringComparison.OrdinalIgnoreCase)).Value is System.Text.Json.Nodes.JsonObject provenance)
-                        {
-                            provenance["retained"] = true;
-                            message = wire.ToJsonString();
-                        }
-                    }
+                    // Broker delivery metadata cannot be cleared by a publisher, including legacy payloads.
+                    data.TransportRetained=data.TransportRetained || e.ApplicationMessage.Retain;
+                    message=JsonSerializer.Serialize(data,new JsonSerializerOptions {PropertyNamingPolicy=JsonNamingPolicy.CamelCase});
                     var persisted = await scope.ServiceProvider.GetRequiredService<TelemetryFunction>().Run(message);
                     if (persisted is null)
                         _logger.LogWarning("Rejected invalid telemetry for device {DeviceId}.", data.DeviceId);
@@ -192,7 +187,9 @@ namespace SmartFactory.Services.TelemetryService.Infrastructure.Services
             await base.StopAsync(cancellationToken);
         }
 
-        private async Task ForwardHeartbeatAsync(IServiceProvider services, string topicDeviceId, string message, CancellationToken cancellationToken)
+        public static bool CompatibleTopic(string[] parts) => parts.Length==5 && parts[0]=="factory" && parts[4] is "telemetry" or "heartbeat" && parts.Skip(1).Take(3).All(p=>Regex.IsMatch(p,"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$",RegexOptions.CultureInvariant));
+
+        private async Task ForwardHeartbeatAsync(IServiceProvider services, string topicDeviceId, string message, bool retained, CancellationToken cancellationToken)
         {
             using var document = JsonDocument.Parse(message);
             var root = document.RootElement;
@@ -218,7 +215,7 @@ namespace SmartFactory.Services.TelemetryService.Infrastructure.Services
             var heartbeatSink = new UriBuilder(sink) { Path = sink.AbsolutePath[..^"telemetry".Length] + "heartbeat", Query = "", Fragment = "" }.Uri;
             using var request = new HttpRequestMessage(HttpMethod.Post, heartbeatSink);
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
-            request.Content = JsonContent.Create(new { deviceId = topicDeviceId, timestamp, status = state.GetString() });
+            request.Content = JsonContent.Create(new { deviceId = topicDeviceId, timestamp, status = state.GetString(), transportRetained=retained });
             using var client = services.GetRequiredService<IHttpClientFactory>().CreateClient("dashboard-ingestion");
             using var response = await client.SendAsync(request, cancellationToken);
             if (response.StatusCode == HttpStatusCode.NotFound)

@@ -14,7 +14,7 @@ public sealed record EdgeAssetConfiguration(string AssetId, string AssetName, st
 /// <summary>Publishes a complete desired-state profile; commands cannot execute arbitrary code.</summary>
 public sealed class EdgeConfigurationPublisher(IConfiguration configuration, IHostEnvironment environment)
 {
-    private static readonly Regex SafeTopicPart = new("^[A-Za-z0-9_-]{1,64}$", RegexOptions.CultureInvariant | RegexOptions.Compiled);
+    private static readonly Regex SafeTopicPart = new("^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$", RegexOptions.CultureInvariant | RegexOptions.Compiled);
 
     public static byte[] BuildConfigurationCommand(EdgeConfigurationRequest request) =>
         JsonSerializer.SerializeToUtf8Bytes(new { action = "replace_asset_configuration", configuration = request },
