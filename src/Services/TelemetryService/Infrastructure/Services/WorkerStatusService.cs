@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Security.Cryptography;
@@ -17,10 +18,14 @@ public sealed class WorkerStatusService(IServiceScopeFactory scopes,IHttpClientF
         var token=Environment.GetEnvironmentVariable("INGESTION_API_TOKEN");
         if(string.IsNullOrEmpty(sink)||string.IsNullOrEmpty(token))return;
         var endpoint=new Uri(new Uri(sink),"/api/internal/worker-status");
+        using var process=Process.GetCurrentProcess();
+        TimeSpan? previousCpu=null;
+        long previousTick=Stopwatch.GetTimestamp();
         while(!cancellation.IsCancellationRequested)
         {
             try
             {
+                var queryTimer=Stopwatch.StartNew();
                 using var scope=scopes.CreateScope();
                 var db=scope.ServiceProvider.GetRequiredService<TelemetryDbContext>();
                 var applied=await db.Database.SqlQueryRaw<string>("SELECT hash AS \"Value\" FROM telemetry_schema_migrations").ToArrayAsync(cancellation);
@@ -35,12 +40,32 @@ public sealed class WorkerStatusService(IServiceScopeFactory scopes,IHttpClientF
                     failedAttempts=g.Count(r=>r.DeliveryQuarantinedAt==null&&r.DeliveryAttempts>0),
                     oldestPendingAt=g.Where(r=>r.DashboardForwardedAt==null&&r.DeliveryQuarantinedAt==null).Min(r=>r.AcceptedAt),
                 }).SingleOrDefaultAsync(cancellation);
+                queryTimer.Stop();
+                process.Refresh();
+                var cpu=process.TotalProcessorTime;
+                var elapsed=Stopwatch.GetElapsedTime(previousTick).TotalSeconds;
+                double? cpuMsPerSecond=previousCpu is not null&&elapsed>0?Math.Max(0,(cpu-previousCpu.Value).TotalMilliseconds/elapsed):null;
+                previousCpu=cpu;previousTick=Stopwatch.GetTimestamp();
+                bool? notificationReady=null;
+                if(Environment.GetEnvironmentVariable("RENDER_SERVICE_ROLE") is "worker" or "all")
+                {
+                    try
+                    {
+                        using var timeout=CancellationTokenSource.CreateLinkedTokenSource(cancellation);
+                        timeout.CancelAfter(TimeSpan.FromSeconds(2));
+                        using var health=await clients.CreateClient("dashboard-ingestion").GetAsync("http://127.0.0.1:3106/health/ready",timeout.Token);
+                        if(health.StatusCode!=System.Net.HttpStatusCode.NotFound)notificationReady=health.IsSuccessStatusCode;
+                    }
+                    catch(OperationCanceledException)when(cancellation.IsCancellationRequested){throw;}
+                    catch{notificationReady=false;}
+                }
                 var source=Environment.GetEnvironmentVariable("BACKEND_SOURCE_REVISION");
                 if(source is not null&&!System.Text.RegularExpressions.Regex.IsMatch(source,"^[a-f0-9]{40}$"))source=null;
                 var report=new {worker="telemetry",source,runtime=Environment.Version.ToString(),contractVersion=2,
                     migrationsDigest=await TelemetryMigrations.DigestAsync(),mqttSubscribed=subscriber.IsSubscriptionReady,
                     observedAt=DateTime.UtcNow,pending=metrics?.pending??0,quarantined=metrics?.quarantined??0,
-                    failedAttempts=metrics?.failedAttempts??0,oldestPendingAt=metrics?.oldestPendingAt};
+                    failedAttempts=metrics?.failedAttempts??0,oldestPendingAt=metrics?.oldestPendingAt,
+                    notificationReady,resources=new {residentBytes=process.WorkingSet64,cpuMsPerSecond,databaseQueryMs=queryTimer.Elapsed.TotalMilliseconds}};
                 using var request=new HttpRequestMessage(HttpMethod.Post,endpoint){Content=JsonContent.Create(report)};
                 request.Headers.Authorization=new AuthenticationHeaderValue("Bearer",token);
                 using var response=await clients.CreateClient("dashboard-ingestion").SendAsync(request,cancellation);
