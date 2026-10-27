@@ -24,3 +24,7 @@ The actual .NET 10 executable applied eight manifest migrations to fresh disposa
 Broker MQTT 5 support is a separate hosted qualification requirement. No factory broker configuration, command, firmware flash, email delivery or production deployment was performed by these tests. Protocol semantics: [OASIS MQTT 5 subscription options](https://docs.oasis-open.org/mqtt/mqtt/v5.0/mqtt-v5.0.html).
 
 The final topic/transport revision passed all 233 .NET tests. `mqtt-topic-v1` encodes dotted canonical IDs at the MQTT boundary; two real disposable broker variants exercised the Pi-local MQTT 5 subscriber, durable spool, .NET worker and Node/SQL receiver. Gateway-child transport verification is preserved across the cloud boundary. These results are software acceptance; ARM64 image, hosted broker and physical commissioning remain separately recorded outcomes.
+
+## Explicit legacy-broker evidence mode
+
+MQTT 5 remains the default. A broker that refuses MQTT 5 may use the explicit worker setting `MqttProtocolVersion=3.1.1-historical`. The service subscribes with MQTT 3.1.1 and retains original acquisition modes/identities/times, but always forwards `transportRetainVerified=false` for both telemetry and heartbeat observations. These cannot update current connectivity or threshold incidents. No automatic downgrade, broker ACL change or inferred retained flag is permitted. A configured MQTT 5 source retains the existing verified subscription policy.
