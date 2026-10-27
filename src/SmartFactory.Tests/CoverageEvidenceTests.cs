@@ -34,11 +34,12 @@ public class CoverageEvidenceTests
             ('urn:private:coverage',1,6000,'{"mode":"live"}',null,888),
             ('urn:private:coverage',1,7000,'{"mode":"live"}','{"power":{"canonicalUnit":"W","conversionVersion":"sf-units-v1","quality":"bad"}}',500),
             ('urn:private:coverage',1,8000,'{"mode":"unknown","evidence":{"legacyReviewed":true}}','{"power":{"canonicalUnit":"W","conversionVersion":"sf-units-v1","quality":"good"}}',50),
+            ('urn:private:coverage',1,9000,'{"mode":"live"}','{"power":{"sourceValue":123,"sourceUnit":null,"canonicalUnit":null,"quality":"unknown"}}',NULL),
             ('urn:demo:coverage',2,1000,'{"mode":"simulated"}','{"power":{"canonicalUnit":"W","conversionVersion":"sf-units-v1","quality":"good"}}',42);
             """))await fixture.ExecuteNonQueryAsync();
             var analytics=new CoverageAnalytics(store);
             async Task<AssetCoverage> Query(string scope)=>(await analytics.Query(new(["urn:private:coverage"],1,10000,scope),default)).Single();
-            var live=await Query("live");Assert.Equal(4,live.Samples);var power=live.Metrics.Single(m=>m.Metric=="power");Assert.Equal(2,power.Samples);Assert.Equal(20,power.Average);Assert.Equal("W",power.Unit);Assert.Equal(2,power.UnverifiedSamples);
+            var live=await Query("live");Assert.Equal(5,live.Samples);var power=live.Metrics.Single(m=>m.Metric=="power");Assert.Equal(2,power.Samples);Assert.Equal(20,power.Average);Assert.Equal("W",power.Unit);Assert.Equal(3,power.UnverifiedSamples);
             Assert.Equal(1000,(await Query("simulated")).Metrics.Single(m=>m.Metric=="power").Average);
             Assert.Equal(2000,(await Query("replay")).Metrics.Single(m=>m.Metric=="power").Average);
             Assert.Equal(30,(await Query("operational")).Metrics.Single(m=>m.Metric=="power").Average);

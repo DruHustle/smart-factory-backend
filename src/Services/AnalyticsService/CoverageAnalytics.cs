@@ -17,7 +17,7 @@ public sealed class CoverageAnalytics(DashboardStore store)
         var names = new[] { "temperature", "humidity", "vibration", "power", "pressure", "rpm" };
         var units = new[] { "°C", "%", "mm/s", "W", "Pa", "rpm" };
         // Identifiers and units come only from these fixed arrays; request values are parameters.
-        var normalized = string.Join(",", names.Select((name,i) => $"r.{name} as raw_{name},CASE WHEN r.measurements->'{name}'->>'canonicalUnit'='{units[i]}' AND r.measurements->'{name}'->>'conversionVersion'='sf-units-v1' AND r.measurements->'{name}'->>'quality'='good' THEN COALESCE((r.measurements->'{name}'->>'canonicalValue')::double precision,r.{name}) ELSE NULL END AS {name}"));
+        var normalized = string.Join(",", names.Select((name,i) => $"CASE WHEN r.{name} IS NOT NULL OR jsonb_typeof(r.measurements->'{name}'->'sourceValue')='number' THEN 1 ELSE NULL END as raw_{name},CASE WHEN r.measurements->'{name}'->>'canonicalUnit'='{units[i]}' AND r.measurements->'{name}'->>'conversionVersion'='sf-units-v1' AND r.measurements->'{name}'->>'quality'='good' THEN COALESCE((r.measurements->'{name}'->>'canonicalValue')::double precision,r.{name}) ELSE NULL END AS {name}"));
         var aggregates = string.Join(",", names.Select(name=>$"count({name}),avg({name}),min({name}),max({name}),count(raw_{name})-count({name})"));
         var query = $$"""
         WITH scoped AS (
