@@ -36,13 +36,19 @@ if (args.Contains("--migrate", StringComparer.Ordinal))
     await using var transaction = await database.BeginTransactionAsync();
     await using (var migrationLock = new NpgsqlCommand("SELECT pg_advisory_xact_lock(20261005)", database, transaction))
         await migrationLock.ExecuteNonQueryAsync();
-    var directory = Environment.GetEnvironmentVariable("TELEMETRY_MIGRATIONS_DIR") ?? "deploy/migrations";
-    foreach (var file in new[] { "telemetry-schema.sql", "20261005_telemetry_delivery.sql", "20261006_dashboard_outbox_index.sql", "20261006_sensor_metadata.sql", "20261025_onesa_provenance.sql", "20261026_telemetry_quarantine.sql", "20261027_engineering_units.sql" })
+    await using (var ledger = new NpgsqlCommand("CREATE TABLE IF NOT EXISTS telemetry_schema_migrations(name text PRIMARY KEY,hash char(64) NOT NULL,applied_at timestamptz NOT NULL DEFAULT now())",database,transaction))await ledger.ExecuteNonQueryAsync();
+    foreach (var file in TelemetryMigrations.Files)
     {
-        var sql = await File.ReadAllTextAsync(Path.Combine(directory, file));
-        await using var command = new NpgsqlCommand(sql, database, transaction);
-        await command.ExecuteNonQueryAsync();
-        Console.WriteLine("Applied telemetry migration: " + file);
+        var hash=await TelemetryMigrations.HashAsync(file);
+        await using var existing=new NpgsqlCommand("SELECT hash FROM telemetry_schema_migrations WHERE name=@name",database,transaction);
+        existing.Parameters.AddWithValue("name",file);
+        var applied=await existing.ExecuteScalarAsync();
+        if(applied is string previous){if(previous!=hash)throw new InvalidOperationException("Applied telemetry migration content changed: "+file);continue;}
+        var sql=await File.ReadAllTextAsync(Path.Combine(TelemetryMigrations.DirectoryPath,file));
+        await using var command=new NpgsqlCommand(sql,database,transaction);await command.ExecuteNonQueryAsync();
+        await using var record=new NpgsqlCommand("INSERT INTO telemetry_schema_migrations(name,hash) VALUES(@name,@hash)",database,transaction);
+        record.Parameters.AddWithValue("name",file);record.Parameters.AddWithValue("hash",hash);await record.ExecuteNonQueryAsync();
+        Console.WriteLine("Applied telemetry migration: "+file);
     }
     await transaction.CommitAsync();
     return;
@@ -71,6 +77,7 @@ var host = Host.CreateDefaultBuilder(args)
 
         services.AddTransient<TelemetryFunction>();
         services.AddHostedService<TelemetryOutboxService>();
+        services.AddHostedService<WorkerStatusService>();
         services.AddHttpClient("dashboard-ingestion", client => client.Timeout = TimeSpan.FromSeconds(10)).ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
         // Share one subscriber instance between the worker and its readiness endpoint.
         services.AddSingleton<MqttTelemetrySubscriberService>();

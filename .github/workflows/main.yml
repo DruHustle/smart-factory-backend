@@ -31,5 +31,5 @@ jobs:
       - name: Audit all NuGet dependencies
         run: dotnet restore src/SmartFactory.sln -p:NuGetAudit=true -p:NuGetAuditMode=all -p:NuGetAuditLevel=high -warnaserror:NU1900,NU1903,NU1904 --force-evaluate
       - run: dotnet test src/SmartFactory.sln -c Release --no-restore
-# The dashboard release workflow tests all three pinned repositories, publishes
-# one six-service image, qualifies the API/worker image by digest, then deploys Vercel.
+# The dashboard owns coordinated disposable qualification and immutable image identity.
+# Oracle backend promotion is manual; Vercel promotion additionally verifies API compatibility.

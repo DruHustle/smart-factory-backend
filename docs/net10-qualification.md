@@ -15,3 +15,10 @@ Delegated DeviceService JWTs retain the parent session ID and generation. The se
 The final combined ARM64 bundle, MQTT/.NET/Node interoperability, immutable release manifest and hosted promotion are separate release acceptance results and must be recorded with the final source revisions.
 
 The trusted-observation candidate preserves source units, raw scaling evidence and broker-retained delivery through the durable outbox. Its new additive migration is included in the actual `--migrate-only` file list. Coverage applies evidence scope before aggregation and only aggregates good-quality canonical units; unclassified legacy data is counted separately. The dashboard owns route commissioning and current-observation eligibility. See the coordinated [engineering contract](https://github.com/DruHustle/smart-factory-iot-frontend/blob/feat/product-experience-trust/docs/trusted-observations.md).
+
+
+## Worker migration and retained-delivery qualification
+
+The actual .NET 10 executable applied eight manifest migrations to fresh disposable PostgreSQL, repeated idempotently, verified the five operational contract columns, and rejected an altered applied migration hash. Full service tests remained 230 passing. The real Mosquitto/Python spool/.NET/Node path exposed MQTT retained flags being cleared on queued delivery; the worker now requires MQTT 5 Retain As Published and treats pre-verification/legacy outbox transport context as historical. The repaired real path passed restart, duplicate, mixed-mode/units, route quarantine and disposable restore identity checks. Evidence is recorded by the dashboard qualification runner against its own synthetic databases.
+
+Broker MQTT 5 support is a separate hosted qualification requirement. No factory broker configuration, command, firmware flash, email delivery or production deployment was performed by these tests. Protocol semantics: [OASIS MQTT 5 subscription options](https://docs.oasis-open.org/mqtt/mqtt/v5.0/mqtt-v5.0.html).

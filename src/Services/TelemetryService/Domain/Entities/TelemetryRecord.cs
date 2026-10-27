@@ -7,6 +7,7 @@ namespace SmartFactory.Services.TelemetryService.Domain.Entities
         public string? MappingJson { get; set; }
         public string? UnitsJson { get; set; }
         public bool TransportRetained { get; set; }
+        public bool TransportRetainVerified { get; set; }
         public string DeviceId { get; set; } = string.Empty;
         public string? GatewayId { get; set; }
         public string? AssetId { get; set; }
@@ -26,5 +27,6 @@ namespace SmartFactory.Services.TelemetryService.Domain.Entities
         public double? Pressure { get; set; }
         public double? Rpm { get; set; }
         public DateTime Timestamp { get; set; }
+        public DateTime? AcceptedAt { get; set; }
     }
 }

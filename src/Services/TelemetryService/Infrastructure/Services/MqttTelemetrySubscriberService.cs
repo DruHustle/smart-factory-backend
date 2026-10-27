@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging;
 using MQTTnet;
 using MQTTnet.Client;
 using MQTTnet.Protocol;
+using MQTTnet.Formatter;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
@@ -95,7 +96,7 @@ namespace SmartFactory.Services.TelemetryService.Infrastructure.Services
                     if(!CompatibleTopic(parts)) { _logger.LogWarning("Rejected MQTT topic outside the compatible identity contract.");await e.AcknowledgeAsync(stoppingToken);return; }
                     if (parts.Length == 5 && parts[0] == "factory" && parts[4] == "heartbeat")
                     {
-                        await ForwardHeartbeatAsync(scope.ServiceProvider, parts[3], message, e.ApplicationMessage.Retain, stoppingToken);
+                        await ForwardHeartbeatAsync(scope.ServiceProvider, parts[3], message, e.ApplicationMessage.Retain, IsSubscriptionReady, stoppingToken);
                         await e.AcknowledgeAsync(stoppingToken);
                         return;
                     }
@@ -110,6 +111,9 @@ namespace SmartFactory.Services.TelemetryService.Infrastructure.Services
                     }
                     // Broker delivery metadata cannot be cleared by a publisher, including legacy payloads.
                     data.TransportRetained=data.TransportRetained || e.ApplicationMessage.Retain;
+                    // Deliveries queued under an earlier subscription may have lost
+                    // their original retain flag. Store them without asserting current state.
+                    data.TransportRetainVerified=IsSubscriptionReady;
                     message=JsonSerializer.Serialize(data,new JsonSerializerOptions {PropertyNamingPolicy=JsonNamingPolicy.CamelCase});
                     var persisted = await scope.ServiceProvider.GetRequiredService<TelemetryFunction>().Run(message);
                     if (persisted is null)
@@ -134,7 +138,7 @@ namespace SmartFactory.Services.TelemetryService.Infrastructure.Services
                 }
             };
 
-            var builder = new MqttClientOptionsBuilder().WithTcpServer(_host, _port).WithClientId(_clientId).WithCleanSession(_cleanSession);
+            var builder = new MqttClientOptionsBuilder().WithTcpServer(_host, _port).WithClientId(_clientId).WithCleanSession(_cleanSession).WithProtocolVersion(MqttProtocolVersion.V500).WithSessionExpiryInterval(uint.MaxValue);
             if (!string.IsNullOrWhiteSpace(_username)) builder.WithCredentials(_username, _password);
             if (_useTls) builder.WithTlsOptions(options => options.UseTls());
             var options = builder.Build();
@@ -148,12 +152,12 @@ namespace SmartFactory.Services.TelemetryService.Infrastructure.Services
                     {
                         await _mqttClient.ConnectAsync(options, stoppingToken);
                         var subscription = await _mqttClient.SubscribeAsync(new MqttTopicFilterBuilder().WithTopic(_topic)
-                            .WithQualityOfServiceLevel(MqttQualityOfServiceLevel.AtLeastOnce).Build(), stoppingToken);
+                            .WithQualityOfServiceLevel(MqttQualityOfServiceLevel.AtLeastOnce).WithRetainAsPublished(true).Build(), stoppingToken);
                         if (subscription.Items.Count == 0 || subscription.Items.Any(item =>
                                 !item.ResultCode.ToString().StartsWith("GrantedQoS", StringComparison.OrdinalIgnoreCase)))
                             throw new InvalidOperationException("MQTT broker rejected the telemetry topic subscription.");
                         var heartbeatSubscription = await _mqttClient.SubscribeAsync(new MqttTopicFilterBuilder().WithTopic(_heartbeatTopic)
-                            .WithQualityOfServiceLevel(MqttQualityOfServiceLevel.AtLeastOnce).Build(), stoppingToken);
+                            .WithQualityOfServiceLevel(MqttQualityOfServiceLevel.AtLeastOnce).WithRetainAsPublished(true).Build(), stoppingToken);
                         if (heartbeatSubscription.Items.Count == 0 || heartbeatSubscription.Items.Any(item =>
                                 !item.ResultCode.ToString().StartsWith("GrantedQoS", StringComparison.OrdinalIgnoreCase)))
                             throw new InvalidOperationException("MQTT broker rejected the heartbeat topic subscription.");
@@ -189,7 +193,7 @@ namespace SmartFactory.Services.TelemetryService.Infrastructure.Services
 
         public static bool CompatibleTopic(string[] parts) => parts.Length==5 && parts[0]=="factory" && parts[4] is "telemetry" or "heartbeat" && parts.Skip(1).Take(3).All(p=>Regex.IsMatch(p,"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$",RegexOptions.CultureInvariant));
 
-        private async Task ForwardHeartbeatAsync(IServiceProvider services, string topicDeviceId, string message, bool retained, CancellationToken cancellationToken)
+        private async Task ForwardHeartbeatAsync(IServiceProvider services, string topicDeviceId, string message, bool retained, bool retainVerified, CancellationToken cancellationToken)
         {
             using var document = JsonDocument.Parse(message);
             var root = document.RootElement;
@@ -215,7 +219,7 @@ namespace SmartFactory.Services.TelemetryService.Infrastructure.Services
             var heartbeatSink = new UriBuilder(sink) { Path = sink.AbsolutePath[..^"telemetry".Length] + "heartbeat", Query = "", Fragment = "" }.Uri;
             using var request = new HttpRequestMessage(HttpMethod.Post, heartbeatSink);
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
-            request.Content = JsonContent.Create(new { deviceId = topicDeviceId, timestamp, status = state.GetString(), transportRetained=retained });
+            request.Content = JsonContent.Create(new { deviceId = topicDeviceId, timestamp, status = state.GetString(), transportRetained=retained,transportRetainVerified=retainVerified });
             using var client = services.GetRequiredService<IHttpClientFactory>().CreateClient("dashboard-ingestion");
             using var response = await client.SendAsync(request, cancellationToken);
             if (response.StatusCode == HttpStatusCode.NotFound)
