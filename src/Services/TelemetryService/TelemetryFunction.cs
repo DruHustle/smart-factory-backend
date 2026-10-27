@@ -50,12 +50,15 @@ namespace SmartFactory.Services.TelemetryService
                 AssetSignals = data.AssetSignals is null ? null : new SortedDictionary<string, double>(data.AssetSignals, StringComparer.Ordinal),
             };
             TelemetryProvenance.TryNormalize(data.Integration,out var provenance,out _);
-            var originalBytes = data.Integration is null || data.Integration.Value.ValueKind == JsonValueKind.Null
-                ? JsonSerializer.SerializeToUtf8Bytes(normalized)
-                : JsonSerializer.SerializeToUtf8Bytes(new { Legacy = normalized, data.Integration });
+            static byte[] Identity(object normalized, JsonElement? metadata, Dictionary<string,string>? units, Dictionary<string,TelemetryMapping>? mapping) {
+                var legacy=metadata is null || metadata.Value.ValueKind==JsonValueKind.Null ? JsonSerializer.SerializeToElement(normalized) : JsonSerializer.SerializeToElement(new {Legacy=normalized,Integration=metadata});
+                if(mapping is {Count:>0})return JsonSerializer.SerializeToUtf8Bytes(new {Legacy=legacy,Units=units is null?null:new SortedDictionary<string,string>(units,StringComparer.Ordinal),Mapping=new SortedDictionary<string,TelemetryMapping>(mapping,StringComparer.Ordinal)});
+                return units is {Count:>0} ? JsonSerializer.SerializeToUtf8Bytes(new {Legacy=legacy,Units=new SortedDictionary<string,string>(units,StringComparer.Ordinal)}) : JsonSerializer.SerializeToUtf8Bytes(legacy);
+            }
+            var originalBytes=Identity(normalized,data.Integration,data.Units,data.Mapping);
             var oldIngestionId=Convert.ToHexString(SHA256.HashData(originalBytes)).ToLowerInvariant();
             data.Integration=provenance;
-            var identityBytes=provenance is null ? JsonSerializer.SerializeToUtf8Bytes(normalized) : JsonSerializer.SerializeToUtf8Bytes(new { Legacy=normalized,data.Integration });
+            var identityBytes=Identity(normalized,data.Integration,data.Units,data.Mapping);
             var ingestionId = Convert.ToHexString(SHA256.HashData(identityBytes)).ToLowerInvariant();
             // Preserve an existing pre-policy ingestion identity on a redelivery.
             var record = await _dbContext.TelemetryRecords.FirstOrDefaultAsync(item => item.IngestionId == ingestionId || item.IngestionId == oldIngestionId);
@@ -64,6 +67,11 @@ namespace SmartFactory.Services.TelemetryService
                 record = new TelemetryRecord
                 {
                     IntegrationJson = data.Integration?.GetRawText(),
+                    MappingJson = data.Mapping is null ? null : JsonSerializer.Serialize(new SortedDictionary<string,TelemetryMapping>(data.Mapping,StringComparer.Ordinal)),
+                    UnitsJson = data.Units is null ? null : JsonSerializer.Serialize(new SortedDictionary<string,string>(data.Units,StringComparer.Ordinal)),
+                    TransportRetained = data.TransportRetained,
+                    TransportRetainVerified=data.TransportRetainVerified==true,
+                    AcceptedAt = DateTime.UtcNow,
                     DeviceId = data.DeviceId, GatewayId = data.GatewayId, AssetId = data.AssetId,
                     SensorType = data.SensorType, SensorStatus = data.SensorStatus,
                     AssetSignalsJson = data.AssetSignals is null ? null : JsonSerializer.Serialize(data.AssetSignals),
@@ -88,12 +96,23 @@ namespace SmartFactory.Services.TelemetryService
         public static bool ValidTelemetry(TelemetryData data)
         {
             if (!TelemetryProvenance.TryNormalize(data.Integration,out _,out _)) return false;
+            var units=new Dictionary<string,string[]>(StringComparer.Ordinal) {
+                ["temperature"]=["°C","C","Cel","°F","F","K"], ["humidity"]=["%","fraction"], ["vibration"]=["mm/s","m/s"],
+                ["power"]=["W","kW","MW"], ["pressure"]=["Pa","kPa","MPa","bar"], ["rpm"]=["rpm","r/min","1/min","Hz"]
+            };
+            if(data.Units is {Count:>6} || data.Units is not null && data.Units.Any(u=>!units.TryGetValue(u.Key,out var allowed)||!allowed.Contains(u.Value)))return false;
+            if(data.Mapping is {Count:>6})return false;
+            if(data.Mapping is not null)foreach(var (metric,mapping) in data.Mapping){
+                if(mapping is null||!units.ContainsKey(metric)||data.Units is null||!data.Units.ContainsKey(metric)||mapping.Version!="sf-mapping-v1"||mapping.RawUnit is not ("register" or "native")||!double.IsFinite(mapping.RawValue)||Math.Abs(mapping.RawValue)>9007199254740991||!double.IsFinite(mapping.Scale)||Math.Abs(mapping.Scale)>1e9||!double.IsFinite(mapping.Offset)||Math.Abs(mapping.Offset)>1e9)return false;
+                var value=metric switch {"temperature"=>data.Temperature,"humidity"=>data.Humidity,"vibration"=>data.Vibration,"power"=>data.Power,"pressure"=>data.Pressure,"rpm"=>data.Rpm,_=>null};
+                if(value is null||Math.Abs(mapping.RawValue*mapping.Scale+mapping.Offset-value.Value)>Math.Max(1e-6,Math.Abs(value.Value)*1e-9))return false;
+            }
             const double MaxMetricMagnitude = 1_000_000_000;
             // Arduino millis() and several industrial counters are unsigned
             // 32-bit values. Keep named signals bounded without rejecting a
             // healthy arm after roughly 11.6 days of uptime.
             const double MaxNamedSignalMagnitude = uint.MaxValue;
-            static bool SafeId(string value) => value is not null && Regex.IsMatch(value, "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$", RegexOptions.CultureInvariant);
+            static bool SafeId(string value) => value is not null && Regex.IsMatch(value, "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$", RegexOptions.CultureInvariant);
             if (!SafeId(data.DeviceId) || (data.GatewayId is not null && !SafeId(data.GatewayId)) ||
                 (data.AssetId is not null && (data.AssetId.Length is 0 or > 128 || data.AssetId.Any(char.IsControl))) ||
                 data.Timestamp is null or <= 0 || data.Timestamp > DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() + 300_000) return false;
@@ -167,6 +186,10 @@ namespace SmartFactory.Services.TelemetryService
                         {
                             integration = record.IntegrationJson is null ? (JsonElement?)null : JsonSerializer.Deserialize<JsonElement>(record.IntegrationJson),
                             deviceId = record.DeviceId, gatewayId = record.GatewayId, assetId = record.AssetId,
+                            mapping = record.MappingJson is null ? null : JsonSerializer.Deserialize<Dictionary<string,TelemetryMapping>>(record.MappingJson),
+                            units = record.UnitsJson is null ? null : JsonSerializer.Deserialize<Dictionary<string,string>>(record.UnitsJson),
+                            transportRetained = record.TransportRetained,
+                            transportRetainVerified=record.TransportRetainVerified,
                             sensorType = record.SensorType, sensorStatus = record.SensorStatus,
                             assetSignals = record.AssetSignalsJson is null ? null : JsonSerializer.Deserialize<Dictionary<string, double>>(record.AssetSignalsJson),
                             ingestionId = record.IngestionId, timestamp = new DateTimeOffset(record.Timestamp).ToUnixTimeMilliseconds(),

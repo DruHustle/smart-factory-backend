@@ -12,7 +12,7 @@
 # Stage 1: Base Runtime Image
 # ----------------------------------------
 # Uses the ASP.NET Core runtime image (smaller than SDK)
-FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS base
+FROM mcr.microsoft.com/dotnet/aspnet:10.0.14-noble AS base
 WORKDIR /app
 ENV ASPNETCORE_HTTP_PORTS=8080 PORT=8080
 RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
@@ -22,18 +22,19 @@ EXPOSE 8080
 EXPOSE 443
 
 # Create a non-root user for running the application (Security Best Practice)
-RUN adduser --disabled-password --gecos "" appuser
+RUN id app
 
 # ----------------------------------------
 # Stage 2: Build Stage
 # ----------------------------------------
 # Uses the full SDK image for building the application
-FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
+FROM mcr.microsoft.com/dotnet/sdk:10.0.403-noble AS build
 WORKDIR /src
 
 # Copy solution and project files first (Layer Caching Optimization)
 # This allows Docker to cache the restore layer if dependencies haven't changed
 COPY ["src/SmartFactory.sln", "src/"]
+COPY ["src/BuildingBlocks/DashboardAccess/DashboardAccess.csproj", "src/BuildingBlocks/DashboardAccess/"]
 COPY ["src/Services/DeviceService/DeviceService.csproj", "src/Services/DeviceService/"]
 
 # Restore NuGet packages (Dependency Inversion Principle - depends on abstractions)
@@ -68,10 +69,10 @@ WORKDIR /app
 COPY --from=publish /app/publish .
 
 # Set ownership to non-root user
-RUN chown -R appuser:appuser /app
+RUN chown -R app:app /app
 
 # Switch to non-root user (Security Best Practice)
-USER appuser
+USER app
 
 # Configure health check for Kubernetes liveness/readiness probes
 # Assumes the service exposes a /health endpoint (Single Responsibility Principle)

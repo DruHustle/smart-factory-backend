@@ -20,6 +20,14 @@ if (string.IsNullOrWhiteSpace(jwtSecret) || Encoding.UTF8.GetByteCount(jwtSecret
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme).AddJwtBearer(options =>
 {
     options.MapInboundClaims = false;
+    options.Events = new JwtBearerEvents { OnTokenValidated = async context => {
+        var principal = context.Principal!;
+        var validator = context.HttpContext.RequestServices.GetService<IDashboardSessionValidator>();
+        if (validator is null || !int.TryParse(principal.FindFirst("sv")?.Value, out var version) || principal.FindFirst("pc")?.Value == "true") { context.Fail("Session unavailable"); return; }
+        try { if (!await validator.Current(principal.FindFirst("openId")?.Value ?? "", principal.FindFirst("sid")?.Value ?? "", version, principal.FindFirst("role")?.Value, context.HttpContext.RequestAborted)) context.Fail("Session no longer active"); }
+        catch { context.Fail("Session verification unavailable"); }
+    }};
+
     options.TokenValidationParameters = new TokenValidationParameters
     {
         ValidateIssuer = true, ValidIssuer = "smart-factory-iot", ValidateAudience = true, ValidAudience = "smart-factory-iot-api",
@@ -58,7 +66,10 @@ builder.Services.AddScoped<IDeviceRepository, DeviceRepository>();
 builder.Services.AddHealthChecks();
 
 var securityConnection=builder.Configuration["DASHBOARD_DATABASE_CONNECTION"];
-if(!string.IsNullOrWhiteSpace(securityConnection))builder.Services.AddSingleton(new DashboardStore(securityConnection,builder.Environment.IsProduction()));
+if(!string.IsNullOrWhiteSpace(securityConnection)) {
+    builder.Services.AddSingleton(new DashboardStore(securityConnection,builder.Environment.IsProduction()));
+    builder.Services.AddSingleton<IDashboardSessionValidator, DashboardSessionValidator>();
+}
 var app = builder.Build();
 app.Use(async (context,next)=>{
     await next();
