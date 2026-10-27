@@ -30,6 +30,7 @@ namespace SmartFactory.Services.TelemetryService.Infrastructure.Services
         private readonly string _clientId;
         private readonly bool _cleanSession;
         private int _subscriptionReady;
+        private readonly MqttEvidenceTransport _transport;
 
         public bool IsSubscriptionReady => _mqttClient.IsConnected && Volatile.Read(ref _subscriptionReady) == 1;
 
@@ -38,6 +39,7 @@ namespace SmartFactory.Services.TelemetryService.Infrastructure.Services
             static string? FirstConfigured(string? primary, string? secondary) =>
                 !string.IsNullOrWhiteSpace(primary) ? primary : !string.IsNullOrWhiteSpace(secondary) ? secondary : null;
 
+            _transport = MqttEvidenceTransport.Parse(FirstConfigured(configuration["Mqtt:ProtocolVersion"], Environment.GetEnvironmentVariable("MqttProtocolVersion")));
             _serviceProvider = serviceProvider;
             _logger = logger;
             _mqttClient = new MqttFactory().CreateMqttClient();
@@ -97,7 +99,7 @@ namespace SmartFactory.Services.TelemetryService.Infrastructure.Services
                     if(!CompatibleTopic(parts)) { _logger.LogWarning("Rejected MQTT topic outside the compatible identity contract.");await e.AcknowledgeAsync(stoppingToken);return; }
                     if (parts.Length == 5 && parts[0] == "factory" && parts[4] == "heartbeat")
                     {
-                        await ForwardHeartbeatAsync(scope.ServiceProvider, TopicIdentity.Decode(parts[3]), message, e.ApplicationMessage.Retain, IsSubscriptionReady, stoppingToken);
+                        await ForwardHeartbeatAsync(scope.ServiceProvider, TopicIdentity.Decode(parts[3]), message, e.ApplicationMessage.Retain, _transport.Verified(IsSubscriptionReady), stoppingToken);
                         await e.AcknowledgeAsync(stoppingToken);
                         return;
                     }
@@ -114,7 +116,7 @@ namespace SmartFactory.Services.TelemetryService.Infrastructure.Services
                     data.TransportRetained=data.TransportRetained || e.ApplicationMessage.Retain;
                     // Deliveries queued under an earlier subscription may have lost
                     // their original retain flag. Store them without asserting current state.
-                    data.TransportRetainVerified=IsSubscriptionReady &&
+                    data.TransportRetainVerified=_transport.Verified(IsSubscriptionReady) &&
                         (!string.IsNullOrEmpty(data.GatewayId)&&data.GatewayId!=data.DeviceId
                             ? data.TransportRetainVerified==true : data.TransportRetainVerified!=false);
                     message=JsonSerializer.Serialize(data,new JsonSerializerOptions {PropertyNamingPolicy=JsonNamingPolicy.CamelCase});
@@ -141,7 +143,8 @@ namespace SmartFactory.Services.TelemetryService.Infrastructure.Services
                 }
             };
 
-            var builder = new MqttClientOptionsBuilder().WithTcpServer(_host, _port).WithClientId(_clientId).WithCleanSession(_cleanSession).WithProtocolVersion(MqttProtocolVersion.V500).WithSessionExpiryInterval(uint.MaxValue);
+            var builder = new MqttClientOptionsBuilder().WithTcpServer(_host, _port).WithClientId(_clientId).WithCleanSession(_cleanSession).WithProtocolVersion(_transport.Protocol);
+            if (_transport.PreservesRetainFlags) builder.WithSessionExpiryInterval(uint.MaxValue);
             if (!string.IsNullOrWhiteSpace(_username)) builder.WithCredentials(_username, _password);
             if (_useTls) builder.WithTlsOptions(options => options.UseTls());
             var options = builder.Build();
@@ -155,16 +158,18 @@ namespace SmartFactory.Services.TelemetryService.Infrastructure.Services
                     {
                         await _mqttClient.ConnectAsync(options, stoppingToken);
                         var subscription = await _mqttClient.SubscribeAsync(new MqttTopicFilterBuilder().WithTopic(_topic)
-                            .WithQualityOfServiceLevel(MqttQualityOfServiceLevel.AtLeastOnce).WithRetainAsPublished(true).Build(), stoppingToken);
+                            .WithQualityOfServiceLevel(MqttQualityOfServiceLevel.AtLeastOnce).WithRetainAsPublished(_transport.PreservesRetainFlags).Build(), stoppingToken);
                         if (subscription.Items.Count == 0 || subscription.Items.Any(item =>
                                 !item.ResultCode.ToString().StartsWith("GrantedQoS", StringComparison.OrdinalIgnoreCase)))
                             throw new InvalidOperationException("MQTT broker rejected the telemetry topic subscription.");
                         var heartbeatSubscription = await _mqttClient.SubscribeAsync(new MqttTopicFilterBuilder().WithTopic(_heartbeatTopic)
-                            .WithQualityOfServiceLevel(MqttQualityOfServiceLevel.AtLeastOnce).WithRetainAsPublished(true).Build(), stoppingToken);
+                            .WithQualityOfServiceLevel(MqttQualityOfServiceLevel.AtLeastOnce).WithRetainAsPublished(_transport.PreservesRetainFlags).Build(), stoppingToken);
                         if (heartbeatSubscription.Items.Count == 0 || heartbeatSubscription.Items.Any(item =>
                                 !item.ResultCode.ToString().StartsWith("GrantedQoS", StringComparison.OrdinalIgnoreCase)))
                             throw new InvalidOperationException("MQTT broker rejected the heartbeat topic subscription.");
                         Interlocked.Exchange(ref _subscriptionReady, 1);
+                        if (!_transport.PreservesRetainFlags)
+                            _logger.LogWarning("MQTT 3.1.1 historical-only intake: retained delivery cannot be verified; telemetry and heartbeats cannot assert current state.");
                         _logger.LogInformation("Connected to MQTT {Host}:{Port} (TLS: {Tls}) and subscribed to {Topic}.", _host, _port, _useTls, _topic);
                         retryDelay = TimeSpan.FromSeconds(1);
                     }
