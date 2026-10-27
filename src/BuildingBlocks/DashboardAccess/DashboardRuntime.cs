@@ -28,7 +28,7 @@ public sealed class DashboardStore : IDisposable
     }
     public async Task<DashboardUser?> GetUser(int id, CancellationToken ct)
     {
-        await using var command = Source.CreateCommand("SELECT id, \"openId\", name, email, role::text FROM users WHERE id = $1");
+        await using var command = Source.CreateCommand("SELECT id, \"openId\", name, email, role::text FROM users WHERE id = $1 AND disabled_at IS NULL AND password_change_required=false");
         command.Parameters.AddWithValue(id);
         await using var reader = await command.ExecuteReaderAsync(ct);
         if (!await reader.ReadAsync(ct)) return null;
@@ -48,6 +48,7 @@ public static class DashboardRuntime
         if (Encoding.UTF8.GetByteCount(token) < 32)
             throw new InvalidOperationException("DASHBOARD_SERVICE_TOKEN must contain at least 32 bytes.");
         builder.Services.AddSingleton(new DashboardStore(connection, builder.Environment.IsProduction()));
+        builder.Services.AddSingleton<IDashboardSessionValidator, DashboardSessionValidator>();
     }
     public static bool ValidToken(string provided, string expected) => CryptographicOperations.FixedTimeEquals(
         SHA256.HashData(Encoding.UTF8.GetBytes(provided)), SHA256.HashData(Encoding.UTF8.GetBytes(expected)));
@@ -62,7 +63,8 @@ public static class DashboardRuntime
                 !int.TryParse(context.Request.Headers["X-User-Id"], out var id) || id < 1)
             { context.Response.StatusCode = 401; await SecurityObservation.Record(context.RequestServices.GetRequiredService<DashboardStore>(), service, 401, app.Logger, context.RequestAborted); return; }
             var user = await context.RequestServices.GetRequiredService<DashboardStore>().GetUser(id, context.RequestAborted);
-            if (user is null) { context.Response.StatusCode = 401; await SecurityObservation.Record(context.RequestServices.GetRequiredService<DashboardStore>(), service, 401, app.Logger, context.RequestAborted); return; }
+            if (user is null || !int.TryParse(context.Request.Headers["X-Auth-Version"], out var version) ||
+                !await context.RequestServices.GetRequiredService<IDashboardSessionValidator>().Current(user.OpenId, context.Request.Headers["X-Session-Id"].ToString(), version, user.Role, context.RequestAborted)) { context.Response.StatusCode = 401; await SecurityObservation.Record(context.RequestServices.GetRequiredService<DashboardStore>(), service, 401, app.Logger, context.RequestAborted); return; }
             context.Items["dashboardUser"] = user;
             await next();
             if(context.Response.StatusCode==403) await SecurityObservation.Record(context.RequestServices.GetRequiredService<DashboardStore>(),service,403,app.Logger,context.RequestAborted);

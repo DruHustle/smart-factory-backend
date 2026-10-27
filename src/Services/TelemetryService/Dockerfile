@@ -12,7 +12,7 @@
 # Stage 1: Base Runtime Image
 # ----------------------------------------
 # Uses the ASP.NET Core runtime image (smaller than SDK)
-FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS base
+FROM mcr.microsoft.com/dotnet/aspnet:10.0.14-noble AS base
 WORKDIR /app
 ENV ASPNETCORE_HTTP_PORTS=8080 PORT=8080
 RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
@@ -28,12 +28,13 @@ RUN adduser --disabled-password --gecos "" appuser
 # Stage 2: Build Stage
 # ----------------------------------------
 # Uses the full SDK image for building the application
-FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
+FROM mcr.microsoft.com/dotnet/sdk:10.0.403-noble AS build
 WORKDIR /src
 
 # Copy solution and project files first (Layer Caching Optimization)
 # This allows Docker to cache the restore layer if dependencies haven't changed
 COPY ["src/SmartFactory.sln", "src/"]
+COPY ["src/BuildingBlocks/DashboardAccess/DashboardAccess.csproj", "src/BuildingBlocks/DashboardAccess/"]
 COPY ["src/Services/TelemetryService/TelemetryService.csproj", "src/Services/TelemetryService/"]
 
 # Restore NuGet packages

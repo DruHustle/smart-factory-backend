@@ -10,13 +10,26 @@ jobs:
   build-and-test:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    services:
+      dashboard-storage:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: smart_factory_iot_e2e
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+    env:
+      TEST_DASHBOARD_DATABASE_CONNECTION: Host=127.0.0.1;Port=5432;Database=smart_factory_iot_e2e;Username=postgres;Password=postgres;SSL Mode=Disable
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with: { persist-credentials: false }
       - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
-        with: { dotnet-version: 8.0.x }
+        with: { dotnet-version: 10.0.403 }
       - name: Audit all NuGet dependencies
         run: dotnet restore src/SmartFactory.sln -p:NuGetAudit=true -p:NuGetAuditMode=all -p:NuGetAuditLevel=high -warnaserror:NU1900,NU1903,NU1904 --force-evaluate
       - run: dotnet test src/SmartFactory.sln -c Release --no-restore
 # The dashboard release workflow tests all three pinned repositories, publishes
-# one six-service image, deploys Render by digest, then deploys Vercel.
+# one six-service image, qualifies the API/worker image by digest, then deploys Vercel.

@@ -1,3 +1,6 @@
+extern alias DeviceRuntime;
+using DeviceServiceProgram = DeviceRuntime::Program;
+using SmartFactory.BuildingBlocks.DashboardAccess;
 using System.IdentityModel.Tokens.Jwt;
 using System.Net;
 using System.Net.Http.Headers;
@@ -18,12 +21,12 @@ using SmartFactory.Services.DeviceService.Domain.Interfaces;
 
 namespace SmartFactory.Tests
 {
-    public class DeviceServiceAuthorizationTests : IClassFixture<WebApplicationFactory<Program>>
+    public class DeviceServiceAuthorizationTests : IClassFixture<WebApplicationFactory<DeviceServiceProgram>>
     {
         private const string Secret = "device-service-e2e-test-secret-at-least-32-bytes";
         private readonly HttpClient _client;
 
-        public DeviceServiceAuthorizationTests(WebApplicationFactory<Program> factory)
+        public DeviceServiceAuthorizationTests(WebApplicationFactory<DeviceServiceProgram> factory)
         {
             _client = factory.WithWebHostBuilder(builder =>
             {
@@ -31,6 +34,8 @@ namespace SmartFactory.Tests
                 builder.ConfigureTestServices(services =>
                 {
                     services.RemoveAll<IDeviceRepository>();
+                    services.RemoveAll<IDashboardSessionValidator>();
+                    services.AddSingleton<IDashboardSessionValidator>(new FixtureSessionValidator());
                     services.AddSingleton<IDeviceRepository>(new FakeDeviceRepository());
                     services.AddSingleton<IStartupFilter, StreamResponseBodyStartupFilter>();
                 });
@@ -193,12 +198,19 @@ namespace SmartFactory.Tests
                     new Claim("openId", $"test-{role}"),
                     new Claim("name", $"Test {role}"),
                     new Claim("role", role),
+                    new Claim("sid", "11000000-0000-4000-8000-000000000001"),
+                    new Claim("sv", "0"),
                 },
                 expires: DateTime.UtcNow.AddMinutes(5),
                 signingCredentials: credentials);
             return new JwtSecurityTokenHandler().WriteToken(token);
         }
 
+        // The role/controller suite isolates publishers from storage. A separate
+        // PostgreSQL regression qualifies the real revocation implementation.
+        private sealed class FixtureSessionValidator : IDashboardSessionValidator {
+            public Task<bool> Current(string openId, string sid, int version, string? role, CancellationToken ct) => Task.FromResult(openId == "test-" + role && version == 0 && Guid.TryParse(sid, out _));
+        }
         private sealed class FakeDeviceRepository : IDeviceRepository
         {
             private readonly Dictionary<int, Device> _devices = new();
