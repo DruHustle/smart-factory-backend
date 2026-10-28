@@ -39,7 +39,10 @@ public sealed class NotificationDeliveryWorker(DashboardStore store, IServiceSco
         var user = await store.GetUser(userId, ct);
         var state = "accepted"; string? failure = null;
         if (!sender.Configured) state = "unconfigured";
-        else if (user is null || (kind != "account_welcome" && !new[] { "engineer", "admin" }.Contains(user.Role)) || !sender.Allows(user.Email)) {
+        else if (user is null ||
+            (kind == "infrastructure" ? user.Role != "admin" :
+                kind != "account_welcome" && !new[] { "engineer", "admin" }.Contains(user.Role)) ||
+            !sender.Allows(user.Email)) {
             state = "no_recipient"; failure = "Current account role or recipient domain is not authorized for email.";
         } else {
             try {
