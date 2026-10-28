@@ -1,5 +1,5 @@
 # ========================================
-# Smart Factory IoT Backend - DeviceService Dockerfile
+# Smart Factory Backend - DeviceService Dockerfile
 # ========================================
 # This Dockerfile follows best practices for .NET microservices:
 # - Multi-stage build for optimized image size

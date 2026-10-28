@@ -17,7 +17,7 @@ const defaults = new Map([
   ["EMAIL_PROVIDER", "ses"],
   ["SES_ENABLED", "true"],
   ["SES_REGION", "us-east-1"],
-  ["SES_FROM", "Smart Factory IoT <smartfactory.notifications@gmail.com>"],
+  ["SES_FROM", "Smart Factory <smartfactory.notifications@gmail.com>"],
   ["SES_ALLOW_ALL_RECIPIENTS", "false"],
   ["SES_ALLOWED_RECIPIENTS", "smartfactory.notifications@gmail.com"],
 ]);

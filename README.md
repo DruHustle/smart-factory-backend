@@ -1,4 +1,9 @@
-# Smart Factory IoT Backend
+# Smart Factory Backend
+
+Canonical checkout: `smart-factory/smart-factory-backend`, alongside
+`smart-factory-frontend` and `smart-factory-edge`. Follow the
+[workspace migration guide](https://github.com/DruHustle/smart-factory-frontend/blob/main/docs/project-naming.md)
+to consolidate existing local folders without resetting local work.
 
 Production AAS runs on the Oracle VM defined by `deploy/terraform/oracle-basyx`, using the `deploy/oracle-basyx` Compose stack and the dedicated Aiven `basyx` database. The dashboard repository's deployment guide remains canonical for the cross-repository release.
 
@@ -14,7 +19,7 @@ This repository contains five .NET services. Production packages them with the N
 
 Dashboard accounts remain the identity authority. No separate Entra SSO account store is required. SMTP/Resend credentials are used only for notification delivery; Entra client credentials are reserved for company AAS OAuth integrations. Dashboard roles are reloaded at each private identity/analytics request; anonymous service calls are rejected. Notifications use the shared PostgreSQL inbox/queue and never accept arbitrary email recipients from public requests.
 
-Use the current [Oracle deployment guide](https://github.com/DruHustle/smart-factory-iot-frontend/blob/main/deploy/oracle/README.md) for production. The [current operating guide](https://github.com/DruHustle/smart-factory-iot-frontend/blob/main/docs/operations.md) covers scope, recovery, runtime compatibility and release evidence. Oracle production settings live in owner-only `.env.api` and `.env.worker` files under `/opt/smart-factory-backend`; the migration preserved the live Render values. The `split-render-env.mjs` helper and Render examples remain for historical rollback use. Start dashboard Compose/BaSyx first, then this repository's Compose services. Replace every `.env.local.example` placeholder and configure the dashboard DB connection and shared internal service token. Local host ports are Device 5001, Identity 5002, Notifications 5003, Analytics 5004, Telemetry health 5005. All bind to loopback. Company AAS services and managed production databases/broker/Redis remain external to the Oracle VM.
+Use the current [Oracle deployment guide](https://github.com/DruHustle/smart-factory-frontend/blob/main/deploy/oracle/README.md) for production. The [current operating guide](https://github.com/DruHustle/smart-factory-frontend/blob/main/docs/operations.md) covers scope, recovery, runtime compatibility and release evidence. Oracle production settings live in owner-only `.env.api` and `.env.worker` files under `/opt/smart-factory-backend`; the migration preserved the live Render values. The `split-render-env.mjs` helper and Render examples remain for historical rollback use. Start dashboard Compose/BaSyx first, then this repository's Compose services. Replace every `.env.local.example` placeholder and configure the dashboard DB connection and shared internal service token. Local host ports are Device 5001, Identity 5002, Notifications 5003, Analytics 5004, Telemetry health 5005. All bind to loopback. Company AAS services and managed production databases/broker/Redis remain external to the Oracle VM.
 
 ## Tests
 
@@ -54,6 +59,6 @@ Telemetry `--migrate` applies the ordered JSON manifest under an advisory transa
 
 ## MQTT identity and retained evidence
 
-Canonical IDs retain dots and colons in JSON and inventory. The `mqtt-topic-v1` contract encodes each literal dot in a topic level as `%2E` (`sensor.temp:01` becomes `sensor%2Etemp:01`); only that escape is decoded. The complete encoded route is limited to 255 UTF-8 bytes for RabbitMQ routing compatibility. Publishers, gateway profiles and device-specific ACLs must use the same reviewed encoded route. Do not rename a commissioned identity or change factory ACLs automatically. See the [shared telemetry contract](https://github.com/DruHustle/smart-factory-iot-frontend/blob/main/docs/telemetry-contract.md) and [RabbitMQ topic semantics](https://www.rabbitmq.com/docs/mqtt#topic-level-separator-and-wildcards).
+Canonical IDs retain dots and colons in JSON and inventory. The `mqtt-topic-v1` contract encodes each literal dot in a topic level as `%2E` (`sensor.temp:01` becomes `sensor%2Etemp:01`); only that escape is decoded. The complete encoded route is limited to 255 UTF-8 bytes for RabbitMQ routing compatibility. Publishers, gateway profiles and device-specific ACLs must use the same reviewed encoded route. Do not rename a commissioned identity or change factory ACLs automatically. See the [shared telemetry contract](https://github.com/DruHustle/smart-factory-frontend/blob/main/docs/telemetry-contract.md) and [RabbitMQ topic semantics](https://www.rabbitmq.com/docs/mqtt#topic-level-separator-and-wildcards).
 
 The Pi-local ingress and cloud subscriber both use MQTT 5 Retain As Published. An upstream gateway child without verified transport context remains historical even when the cloud subscription is verified; downstream delivery cannot upgrade an explicit false upstream flag. The disposable two-broker acceptance passed with both RabbitMQ 4.3.6 and Mosquitto 2.0.22 as cloud broker, including punctuated identities, retained delivery, outage/restart, deduplication and database restore. This does not attest a hosted broker configuration.
