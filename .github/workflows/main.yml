@@ -14,7 +14,7 @@ jobs:
       dashboard-storage:
         image: postgres:16-alpine
         env:
-          POSTGRES_DB: smart_factory_iot_e2e
+          POSTGRES_DB: smart_factory_e2e
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
         ports: ['5432:5432']
@@ -22,7 +22,7 @@ jobs:
           --health-cmd "pg_isready -U postgres"
           --health-interval 5s --health-timeout 3s --health-retries 20
     env:
-      TEST_DASHBOARD_DATABASE_CONNECTION: Host=127.0.0.1;Port=5432;Database=smart_factory_iot_e2e;Username=postgres;Password=postgres;SSL Mode=Disable
+      TEST_DASHBOARD_DATABASE_CONNECTION: Host=127.0.0.1;Port=5432;Database=smart_factory_e2e;Username=postgres;Password=postgres;SSL Mode=Disable
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with: { persist-credentials: false }

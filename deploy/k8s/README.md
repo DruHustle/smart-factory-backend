@@ -4,4 +4,4 @@ The retained manifests describe an earlier deployment and are outside the suppor
 
 If these references are adapted for a future Kubernetes rollout, run both digest-pinned jobs in `migrations/` before the matching DeviceService and TelemetryService workloads. Give each Job a release-specific name and do not start the telemetry worker unless the telemetry migration completes successfully.
 
-Use the canonical [Vercel/Render and local guide](https://github.com/DruHustle/smart-factory-iot-frontend/blob/main/RENDER_DEPLOYMENT.md).
+Use the canonical [Vercel/Render and local guide](https://github.com/DruHustle/smart-factory-frontend/blob/main/RENDER_DEPLOYMENT.md).

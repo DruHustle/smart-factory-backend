@@ -14,7 +14,7 @@ Delegated DeviceService JWTs retain the parent session ID and generation. The se
 
 The final combined ARM64 bundle, MQTT/.NET/Node interoperability, immutable release manifest and hosted promotion are separate release acceptance results and must be recorded with the final source revisions.
 
-The trusted-observation candidate preserves source units, raw scaling evidence and broker-retained delivery through the durable outbox. Its new additive migration is included in the actual `--migrate-only` file list. Coverage applies evidence scope before aggregation and only aggregates good-quality canonical units; unclassified legacy data is counted separately. The dashboard owns route commissioning and current-observation eligibility. See the coordinated [engineering contract](https://github.com/DruHustle/smart-factory-iot-frontend/blob/feat/product-experience-trust/docs/trusted-observations.md).
+The trusted-observation candidate preserves source units, raw scaling evidence and broker-retained delivery through the durable outbox. Its new additive migration is included in the actual `--migrate-only` file list. Coverage applies evidence scope before aggregation and only aggregates good-quality canonical units; unclassified legacy data is counted separately. The dashboard owns route commissioning and current-observation eligibility. See the coordinated [engineering contract](https://github.com/DruHustle/smart-factory-frontend/blob/feat/product-experience-trust/docs/trusted-observations.md).
 
 
 ## Worker migration and retained-delivery qualification

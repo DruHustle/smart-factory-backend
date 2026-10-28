@@ -1,5 +1,5 @@
 # ========================================
-# Smart Factory IoT Backend - TelemetryService Dockerfile
+# Smart Factory Backend - TelemetryService Dockerfile
 # ========================================
 # This Dockerfile follows best practices for .NET microservices:
 # - Multi-stage build for optimized image size

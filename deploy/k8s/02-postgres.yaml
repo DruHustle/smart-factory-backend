@@ -1,6 +1,6 @@
 # LOCAL DEVELOPMENT ONLY. This in-cluster PostgreSQL example is excluded from the production Kustomization.
 # ========================================
-# Smart Factory IoT Backend - PostgreSQL Database
+# Smart Factory Backend - PostgreSQL Database
 # ========================================
 # This manifest deploys PostgreSQL 16 with:
 # - Persistent storage for data durability

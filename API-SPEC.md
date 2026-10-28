@@ -1,4 +1,4 @@
-# Smart Factory IoT Backend API and Messaging Contract
+# Smart Factory Backend API and Messaging Contract
 
 This specification documents the current .NET service boundaries and the shared edge telemetry message. The Node/tRPC dashboard API, account roles, AAS procedures, and service-to-service bridge are documented in the root repository's `docs/authorization-and-aas.md`.
 

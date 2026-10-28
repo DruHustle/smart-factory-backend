@@ -1,6 +1,6 @@
 asyncapi: 2.6.0
 info:
-  title: Smart Factory IoT Edge Telemetry
+  title: Smart Factory Edge Telemetry
   version: 2.0.0
   description: Normalized MQTT telemetry published by edge gateways and consumed by TelemetryService.
 servers:

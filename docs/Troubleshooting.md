@@ -18,6 +18,6 @@
 | MQTT connects but no reading is stored | Check the encoded topic (`.` becomes `%2E`), canonical JSON `deviceId`, reviewed source/route, UTC acquisition time, units, quarantine counters and consumer logs. Unverified retained-delivery context remains historical. |
 | Dashboard has no forwarded readings | Configure both bridge URL and distinct `INGESTION_API_TOKEN`; check HTTPS, network route, exact token, and API logs. |
 
-For login/AAS issues see the dashboard repository's [login troubleshooting](https://github.com/DruHustle/smart-factory-iot-frontend/blob/main/LOGIN_TROUBLESHOOTING.md).
+For login/AAS issues see the dashboard repository's [login troubleshooting](https://github.com/DruHustle/smart-factory-frontend/blob/main/LOGIN_TROUBLESHOOTING.md).
 
-For combined Oracle bundle readiness 503, inspect the six Supervisor process statuses and their private health routes, then check database migrations and verified PostgreSQL/Redis/MQTT connectivity. Keep secrets out of logs. See the canonical [Oracle operating guide](https://github.com/DruHustle/smart-factory-iot-frontend/blob/main/deploy/oracle/README.md).
+For combined Oracle bundle readiness 503, inspect the six Supervisor process statuses and their private health routes, then check database migrations and verified PostgreSQL/Redis/MQTT connectivity. Keep secrets out of logs. See the canonical [Oracle operating guide](https://github.com/DruHustle/smart-factory-frontend/blob/main/deploy/oracle/README.md).
