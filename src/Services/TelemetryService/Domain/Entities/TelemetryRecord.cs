@@ -4,6 +4,7 @@ namespace SmartFactory.Services.TelemetryService.Domain.Entities
     {
         public int Id { get; set; }
         public string? IntegrationJson { get; set; }
+        public string? ConnectivityJson { get; set; }
         public string? MappingJson { get; set; }
         public string? UnitsJson { get; set; }
         public bool TransportRetained { get; set; }

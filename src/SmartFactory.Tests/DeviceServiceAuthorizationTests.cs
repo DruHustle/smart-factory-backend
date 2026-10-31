@@ -24,6 +24,7 @@ namespace SmartFactory.Tests
     public class DeviceServiceAuthorizationTests : IClassFixture<WebApplicationFactory<DeviceServiceProgram>>
     {
         private const string Secret = "device-service-e2e-test-secret-at-least-32-bytes";
+        private const string ProvisioningToken = "connectivity-fixture-service-token-at-least-32-bytes";
         private readonly HttpClient _client;
 
         public DeviceServiceAuthorizationTests(WebApplicationFactory<DeviceServiceProgram> factory)
@@ -31,6 +32,7 @@ namespace SmartFactory.Tests
             _client = factory.WithWebHostBuilder(builder =>
             {
                 builder.UseSetting("JWT_SECRET", Secret);
+                builder.UseSetting("AAS_PROVISIONING_TOKEN", ProvisioningToken);
                 builder.ConfigureTestServices(services =>
                 {
                     services.RemoveAll<IDeviceRepository>();
@@ -47,6 +49,35 @@ namespace SmartFactory.Tests
         {
             var response = await _client.GetAsync("/api/devices");
             Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        }
+
+        [Theory]
+        [InlineData("sync")]
+        [InlineData("probe")]
+        public async Task ConnectivityRoutesRequireThePrivateProvisioningToken(string operation)
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Post, $"/api/assets/connectivity/{operation}")
+            {
+                Content = JsonContent.Create(new { }),
+            };
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", CreateToken("engineer"));
+            var response = await _client.SendAsync(request);
+            Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        }
+
+        [Theory]
+        [InlineData("sync")]
+        [InlineData("probe")]
+        public async Task ConnectivityRoutesValidateBeforeAnyBrokerPublication(string operation)
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Post, $"/api/assets/connectivity/{operation}")
+            {
+                Content = JsonContent.Create(new { execute = "unsupported" }),
+            };
+            request.Headers.Add("X-AAS-Provisioning-Token", ProvisioningToken);
+            var response = await _client.SendAsync(request);
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+            Assert.DoesNotContain("unsupported", await response.Content.ReadAsStringAsync());
         }
 
         [Theory]

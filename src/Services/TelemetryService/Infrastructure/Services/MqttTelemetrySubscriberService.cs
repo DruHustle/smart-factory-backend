@@ -119,7 +119,7 @@ namespace SmartFactory.Services.TelemetryService.Infrastructure.Services
                     data.TransportRetainVerified=_transport.Verified(IsSubscriptionReady) &&
                         (!string.IsNullOrEmpty(data.GatewayId)&&data.GatewayId!=data.DeviceId
                             ? data.TransportRetainVerified==true : data.TransportRetainVerified!=false);
-                    message=JsonSerializer.Serialize(data,new JsonSerializerOptions {PropertyNamingPolicy=JsonNamingPolicy.CamelCase});
+                    message=ConnectivityTelemetry.SerializeForPersistence(data);
                     var persisted = await scope.ServiceProvider.GetRequiredService<TelemetryFunction>().Run(message);
                     if (persisted is null)
                         _logger.LogWarning("Rejected invalid telemetry for device {DeviceId}.", data.DeviceId);
