@@ -1,4 +1,4 @@
-name: smart-factory-iot-backend
+name: smart-factory-backend
 services:
   rabbitmq:
     image: rabbitmq:4.3.6-management
@@ -158,5 +158,5 @@ networks:
   sf-network:
     driver: bridge
   aas-shared:
-    name: smart-factory-iot-shared
+    name: smart-factory-shared
     external: true
