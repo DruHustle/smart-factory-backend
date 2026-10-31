@@ -120,8 +120,45 @@ public class PasswordResetCryptoTests
     }
 }
 
+[Collection("SMTP transport")]
 public class PasswordResetQueueTests
 {
+    [Fact]
+    [Trait("Category", "Postgres")]
+    public async Task DeliversTheNodeEnvelopeThroughAuthenticatedStartTlsAndRetainsOnlySafeQueueState()
+    {
+        await using var fixture = await ResetDatabase.Create();
+        await using var smtp = new LoopbackSmtpServer();
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> {
+            ["SMTP_HOST"] = "127.0.0.1",
+            ["SMTP_PORT"] = smtp.Port.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["SMTP_USERNAME"] = LoopbackSmtpServer.Username,
+            ["SMTP_PASSWORD"] = LoopbackSmtpServer.Password,
+            ["SMTP_FROM"] = "Smart Factory Test <sender@example.test>",
+            ["SMTP_ALLOWED_RECIPIENTS"] = PasswordResetFixture.Email,
+        }).Build();
+        var sender = new SmtpMailSender(configuration);
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        Assert.True(await fixture.Worker().DeliverOne(sender, deadline.Token));
+        var captured = await smtp.Message.WaitAsync(deadline.Token);
+        Assert.True(captured.Tls);
+        Assert.True(captured.Authenticated);
+        Assert.Equal(PasswordResetFixture.Email, captured.Recipient);
+        Assert.Contains("X-Smart-Factory-Notification-Id: -42", captured.Content, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(PasswordResetFixture.Link, captured.DecodedContent);
+        Assert.Contains("If you did not request", captured.DecodedContent);
+        var state = await fixture.State();
+        Assert.Equal("accepted", state.Status);
+        Assert.Equal(1, state.Attempts);
+        Assert.Equal("", state.Payload);
+        Assert.Null(state.Error);
+        Assert.Null(state.UsedAt);
+        Assert.False(await fixture.Worker().DeliverOne(sender, deadline.Token));
+        // This proves the real worker and SMTP adapter to a local capture
+        // endpoint. Production-provider acceptance and mailbox receipt remain
+        // distinct release checks; no message leaves the loopback interface.
+    }
+
     [Theory]
     [Trait("Category", "Postgres")]
     [InlineData("accepted", "accepted", 1, true)]
