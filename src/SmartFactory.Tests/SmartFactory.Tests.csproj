@@ -35,5 +35,8 @@
 
   <ItemGroup>
     <None Include="../../fixtures/telemetry/provenance-v1.json" Link="fixtures/provenance-v1.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../../fixtures/connectivity/industrial-v1.json" Link="fixtures/industrial-connectivity-v1.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../../deploy/migrations/*.sql" Link="fixtures/telemetry-migrations/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../../deploy/migrations/manifest.json" Link="fixtures/telemetry-migrations/manifest.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

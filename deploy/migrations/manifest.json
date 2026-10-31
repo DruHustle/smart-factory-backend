@@ -6,5 +6,6 @@
   "20261025_onesa_provenance.sql",
   "20261026_telemetry_quarantine.sql",
   "20261027_engineering_units.sql",
-  "20261027_worker_observation.sql"
+  "20261027_worker_observation.sql",
+  "20261031_industrial_connectivity.sql"
 ]

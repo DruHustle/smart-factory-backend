@@ -1,6 +1,7 @@
 using System.Net;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -126,6 +127,34 @@ public sealed class AssetsController(AasProvisioningService provisioner, EdgeCon
         catch (ArgumentException error) { return BadRequest(new { error = error.Message }); }
         catch (InvalidOperationException error) { return StatusCode(503, new { error = error.Message }); }
         catch (Exception error) { logger.LogError(error, "Edge configuration publish failed."); return StatusCode(502, new { error = "MQTT configuration publication failed." }); }
+    }
+
+    [HttpPost("connectivity/sync"), AllowAnonymous, RequestSizeLimit(64 * 1024)]
+    public async Task<IActionResult> SyncConnectivity([FromBody] JsonElement request, CancellationToken ct)
+    {
+        if (!HasProvisioningToken()) return Unauthorized(new { error = "A valid provisioning service token is required." });
+        try
+        {
+            await edgePublisher.PublishConnectivityAsync(request, ct);
+            return Accepted(new { published = true, applied = false, configurationRevision = decimal.ToInt64(request.GetProperty("revision").GetDecimal()) });
+        }
+        catch (ArgumentException error) { return BadRequest(new { error = error.Message }); }
+        catch (InvalidOperationException) { return StatusCode(503, new { error = "Connectivity publication is not configured." }); }
+        catch (Exception error) { logger.LogError(error, "Connectivity profile publication failed."); return StatusCode(502, new { error = "Connectivity profile could not be published." }); }
+    }
+
+    [HttpPost("connectivity/probe"), AllowAnonymous, RequestSizeLimit(64 * 1024)]
+    public async Task<IActionResult> ProbeConnectivity([FromBody] JsonElement request, CancellationToken ct)
+    {
+        if (!HasProvisioningToken()) return Unauthorized(new { error = "A valid provisioning service token is required." });
+        try
+        {
+            await edgePublisher.ProbeConnectivityAsync(request, ct);
+            return Accepted(new { published = true, commandId = request.GetProperty("commandId").GetString(), deviceConnectionConfirmed = false });
+        }
+        catch (ArgumentException error) { return BadRequest(new { error = error.Message }); }
+        catch (InvalidOperationException) { return StatusCode(503, new { error = "Connectivity publication is not configured." }); }
+        catch (Exception error) { logger.LogError(error, "Connectivity probe publication failed."); return StatusCode(502, new { error = "Connectivity probe could not be published." }); }
     }
 
     [HttpPost("control"), Authorize(Roles = "engineer,admin")]

@@ -20,4 +20,5 @@
 
   <ItemGroup><ProjectReference Include="../../BuildingBlocks/DashboardAccess/DashboardAccess.csproj" /></ItemGroup>
   <ItemGroup><Compile Include="../../BuildingBlocks/TelemetryContract/TopicIdentity.cs" Link="Contracts/TopicIdentity.cs" /></ItemGroup>
+  <ItemGroup><Compile Include="../../BuildingBlocks/TelemetryContract/IndustrialConnectivityContract.cs" Link="Contracts/IndustrialConnectivityContract.cs" /></ItemGroup>
 </Project>

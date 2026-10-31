@@ -50,6 +50,10 @@ The candidate targets .NET 10 LTS with the pinned SDK/runtime and compatible pac
 
 TelemetryService accepts an optional `integration` object on the existing MQTT payload and persists it as `IntegrationJson`, unchanged through bridge retries. It carries explicit live/simulated/replay mode, UTC gateway receipt time, source quality/connection, session/sequence and scenario/replay identity. Simulated/replay data remains classified even over real MQTT. Legacy payloads retain their previous ingestion identity and explicit unclassified history; current eligibility and units require reviewed source policy. Apply `deploy/migrations/20261025_onesa_provenance.sql` before deploying the updated worker; `--migrate` includes it. No Onesa service or credential is required by this worker. The dashboard owns local 3D and the optional outbound adapter; no new MQTT subscriber or poller is introduced. Native model storage and rendering remain within the dashboard repository.
 
+## Industrial Device Connectivity
+
+DeviceService now publishes bounded, revisioned read-only profiles and expiring probes for OPC UA, Modbus TCP/RTU, MQTT and OPC UA FX. Typed tag observations, FX model/UADP evidence and TSN diagnostics use the existing telemetry subscriber and durable dashboard outbox. The new retained `/commands/connectivity` topic preserves the legacy asset profile on `/commands`. Apply `20261031_industrial_connectivity.sql` through the telemetry migration manifest before starting this worker, and commission the gateway-specific broker permission for the additional topic. See [the connectivity contract and qualification guide](docs/industrial-device-connectivity.md) for API boundaries, exact types, applied-revision receipts, tests and hardware limitations.
+
 ## Native OT security evidence
 
 See [the service observation boundary](docs/cybersecurity.md) for sanitized actual access decisions, durable delivery, limits and current Oracle release procedure.

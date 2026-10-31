@@ -13,7 +13,7 @@ public sealed record EdgeConfigurationRequest(int SchemaVersion, string GatewayD
 public sealed record EdgeAssetConfiguration(string AssetId, string AssetName, string Protocol, string? Endpoint, List<Dictionary<string, JsonElement>> TagMappings);
 
 /// <summary>Publishes a complete desired-state profile; commands cannot execute arbitrary code.</summary>
-public sealed class EdgeConfigurationPublisher(IConfiguration configuration, IHostEnvironment environment)
+public sealed partial class EdgeConfigurationPublisher(IConfiguration configuration, IHostEnvironment environment)
 {
     private static readonly Regex SafeTopicPart = new("^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$", RegexOptions.CultureInvariant | RegexOptions.Compiled);
 

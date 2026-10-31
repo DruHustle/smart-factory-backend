@@ -54,15 +54,22 @@ namespace SmartFactory.Services.TelemetryService
                 AssetSignals = data.AssetSignals is null ? null : new SortedDictionary<string, double>(data.AssetSignals, StringComparer.Ordinal),
             };
             TelemetryProvenance.TryNormalize(data.Integration,out var provenance,out _);
-            static byte[] Identity(object normalized, JsonElement? metadata, Dictionary<string,string>? units, Dictionary<string,TelemetryMapping>? mapping) {
+            ConnectivityTelemetry.TryNormalize(data.Connectivity, out var connectivity, out _);
+            static byte[] LegacyIdentity(object normalized, JsonElement? metadata, Dictionary<string,string>? units, Dictionary<string,TelemetryMapping>? mapping) {
                 var legacy=metadata is null || metadata.Value.ValueKind==JsonValueKind.Null ? JsonSerializer.SerializeToElement(normalized) : JsonSerializer.SerializeToElement(new {Legacy=normalized,Integration=metadata});
                 if(mapping is {Count:>0})return JsonSerializer.SerializeToUtf8Bytes(new {Legacy=legacy,Units=units is null?null:new SortedDictionary<string,string>(units,StringComparer.Ordinal),Mapping=new SortedDictionary<string,TelemetryMapping>(mapping,StringComparer.Ordinal)});
                 return units is {Count:>0} ? JsonSerializer.SerializeToUtf8Bytes(new {Legacy=legacy,Units=new SortedDictionary<string,string>(units,StringComparer.Ordinal)}) : JsonSerializer.SerializeToUtf8Bytes(legacy);
             }
-            var originalBytes=Identity(normalized,data.Integration,data.Units,data.Mapping);
+            static byte[] Identity(object normalized, JsonElement? metadata, Dictionary<string,string>? units, Dictionary<string,TelemetryMapping>? mapping, JsonElement? connectivity) {
+                var legacy = LegacyIdentity(normalized,metadata,units,mapping);
+                // Absent connectivity must produce byte-for-byte identical legacy identities.
+                return connectivity is null ? legacy : JsonSerializer.SerializeToUtf8Bytes(new { Legacy=JsonSerializer.Deserialize<JsonElement>(legacy),Connectivity=connectivity });
+            }
+            var originalBytes=Identity(normalized,data.Integration,data.Units,data.Mapping,connectivity);
             var oldIngestionId=Convert.ToHexString(SHA256.HashData(originalBytes)).ToLowerInvariant();
             data.Integration=provenance;
-            var identityBytes=Identity(normalized,data.Integration,data.Units,data.Mapping);
+            data.Connectivity=connectivity;
+            var identityBytes=Identity(normalized,data.Integration,data.Units,data.Mapping,connectivity);
             var ingestionId = Convert.ToHexString(SHA256.HashData(identityBytes)).ToLowerInvariant();
             // Preserve an existing pre-policy ingestion identity on a redelivery.
             var record = await _dbContext.TelemetryRecords.FirstOrDefaultAsync(item => item.IngestionId == ingestionId || item.IngestionId == oldIngestionId);
@@ -71,6 +78,7 @@ namespace SmartFactory.Services.TelemetryService
                 record = new TelemetryRecord
                 {
                     IntegrationJson = data.Integration?.GetRawText(),
+                    ConnectivityJson = data.Connectivity?.GetRawText(),
                     MappingJson = data.Mapping is null ? null : JsonSerializer.Serialize(new SortedDictionary<string,TelemetryMapping>(data.Mapping,StringComparer.Ordinal)),
                     UnitsJson = data.Units is null ? null : JsonSerializer.Serialize(new SortedDictionary<string,string>(data.Units,StringComparer.Ordinal)),
                     TransportRetained = data.TransportRetained,
@@ -102,6 +110,8 @@ namespace SmartFactory.Services.TelemetryService
         public static bool ValidTelemetry(TelemetryData data)
         {
             if (!TelemetryProvenance.TryNormalize(data.Integration,out _,out _)) return false;
+            if (!ConnectivityTelemetry.TryNormalize(data.Connectivity, out var connectivity, out _)) return false;
+            if (connectivity is not null && (data.GatewayId != data.DeviceId || data.AssetId is not null || data.Integration is null || data.Integration.Value.ValueKind == JsonValueKind.Null)) return false;
             var units=new Dictionary<string,string[]>(StringComparer.Ordinal) {
                 ["temperature"]=["°C","C","Cel","°F","F","K"], ["humidity"]=["%","fraction"], ["vibration"]=["mm/s","m/s"],
                 ["power"]=["W","kW","MW"], ["pressure"]=["Pa","kPa","MPa","bar"], ["rpm"]=["rpm","r/min","1/min","Hz"]
@@ -180,6 +190,16 @@ namespace SmartFactory.Services.TelemetryService
                     else record.IntegrationJson=canonical?.GetRawText();
                 }catch(JsonException){quarantine="historical_provenance_validation";}
             }
+            if (record.ConnectivityJson is not null)
+            {
+                try
+                {
+                    using var metadata = JsonDocument.Parse(record.ConnectivityJson);
+                    if (!ConnectivityTelemetry.TryNormalize(metadata.RootElement, out var canonical, out _)) quarantine = "historical_connectivity_validation";
+                    else record.ConnectivityJson = canonical?.GetRawText();
+                }
+                catch (JsonException) { quarantine = "historical_connectivity_validation"; }
+            }
             var sinkUrl = Environment.GetEnvironmentVariable("INTERNAL_TELEMETRY_SINK_URL");
             var token = Environment.GetEnvironmentVariable("INGESTION_API_TOKEN");
             if (quarantine is null && !string.IsNullOrWhiteSpace(sinkUrl) && record.DashboardForwardedAt is null)
@@ -192,6 +212,7 @@ namespace SmartFactory.Services.TelemetryService
                         Content = JsonContent.Create(new
                         {
                             integration = record.IntegrationJson is null ? (JsonElement?)null : JsonSerializer.Deserialize<JsonElement>(record.IntegrationJson),
+                            connectivity = record.ConnectivityJson is null ? (JsonElement?)null : JsonSerializer.Deserialize<JsonElement>(record.ConnectivityJson),
                             deviceId = record.DeviceId, gatewayId = record.GatewayId, assetId = record.AssetId,
                             mapping = record.MappingJson is null ? null : JsonSerializer.Deserialize<Dictionary<string,TelemetryMapping>>(record.MappingJson),
                             units = record.UnitsJson is null ? null : JsonSerializer.Deserialize<Dictionary<string,string>>(record.UnitsJson),
