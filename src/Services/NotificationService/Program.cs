@@ -19,6 +19,8 @@ if (emailProvider == "ses") {
     builder.Services.AddSingleton<IEmailSender>(new SmtpMailSender(builder.Configuration));
 } else throw new InvalidOperationException("EMAIL_PROVIDER must be 'smtp', 'ses' or 'resend'.");
 builder.Services.AddHostedService<NotificationDeliveryWorker>();
+builder.Services.AddSingleton(PasswordResetDeliveryOptions.FromConfiguration(builder.Configuration, builder.Environment.IsDevelopment()));
+builder.Services.AddHostedService<PasswordResetDeliveryWorker>();
 var app = builder.Build();
 app.UseDashboardAccess("SELECT id FROM notification_inbox LIMIT 1");
 app.MapGet("/api/notifications/status", (IEmailSender sender) => Results.Ok(new { emailConfigured = sender.Configured, provider = sender.Provider, delivery = "at-least-once" }));

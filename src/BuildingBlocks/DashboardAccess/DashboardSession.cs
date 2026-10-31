@@ -1,7 +1,5 @@
-using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
-using Microsoft.Extensions.Configuration;
 
 namespace SmartFactory.BuildingBlocks.DashboardAccess;
 
@@ -9,14 +7,13 @@ public interface IDashboardSessionValidator
 {
     Task<bool> Current(string openId, string sessionId, int version, string? role, CancellationToken ct);
 }
-public sealed class DashboardSessionValidator(DashboardStore store, IConfiguration configuration) : IDashboardSessionValidator
+public sealed class DashboardSessionValidator(DashboardStore store) : IDashboardSessionValidator
 {
-    public static bool PublicDeployment(IConfiguration configuration) => configuration["PUBLIC_DEMO_DEPLOYMENT"] == "true" || configuration["ENABLE_DEMO_ACCOUNTS"] == "true";
     public static bool Shared(string openId, string? email) => openId.StartsWith("demo-", StringComparison.Ordinal) ||
         new[] { "admin@dev.local", "operator@dev.local", "tech@dev.local", "demo@dev.local" }.Contains(email?.ToLowerInvariant());
     public async Task<bool> Current(string openId, string sessionId, int version, string? role, CancellationToken ct)
     {
-        if (PublicDeployment(configuration) || string.IsNullOrWhiteSpace(openId) || openId.Length > 255 ||
+        if (string.IsNullOrWhiteSpace(openId) || openId.Length > 255 ||
             !Guid.TryParseExact(sessionId, "D", out _) || version < 0) return false;
         await using var command = store.Source.CreateCommand("""
         SELECT "openId", email, role::text FROM users u WHERE "openId"=$1 AND disabled_at IS NULL
