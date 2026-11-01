@@ -11,6 +11,48 @@ namespace SmartFactory.Tests;
 
 public sealed class AasProvisioningTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CancelledCreateOrImportRemovesConfirmedWrites(bool import)
+    {
+        using var cancellation = new CancellationTokenSource();
+        var repository = new RevisionHandler();
+        var handler = new CancelWriteHandler(repository, HttpMethod.Post, cancellation);
+        var service = CreateService(handler);
+        if (import)
+        {
+            var documents = AasDocumentsBuilder.Build(Asset());
+            var model = JsonSerializer.Serialize(new { assetAdministrationShells = new[] { documents.Shell }, submodels = documents.Submodels });
+            using var bytes = new MemoryStream();
+            using (var package = new AasCore.Aas3.Package.Packaging().Create(bytes))
+            {
+                var part = package.PutPart(new Uri("/aasx/environment.json", UriKind.Relative), "application/json", Encoding.UTF8.GetBytes(model));
+                package.MakeSpec(part);
+                package.Flush();
+            }
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => service.ImportAasxAsync(bytes.ToArray(), "cancelled.aasx", cancellation.Token));
+        }
+        else await Assert.ThrowsAnyAsync<OperationCanceledException>(() => service.CreateAsync(Asset(), cancellation.Token));
+        Assert.True(cancellation.IsCancellationRequested);
+        Assert.Single(repository.Requests, request => request.Method == HttpMethod.Delete);
+        Assert.Empty(repository.Resources);
+    }
+
+    [Fact]
+    public async Task CancelledRevisionRestoresConfirmedWrites()
+    {
+        using var cancellation = new CancellationTokenSource();
+        var repository = new RevisionHandler();
+        var service = CreateService(new CancelWriteHandler(repository, HttpMethod.Put, cancellation));
+        await service.CreateAsync(Asset(), CancellationToken.None);
+        var before = repository.Resources.ToDictionary(pair => pair.Key, pair => pair.Value);
+        var revision = Asset() with { AasVersion = 2, ExpectedAasVersion = 1, ManufacturerStreet = "Changed street" };
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => service.UpdateAsync(revision, cancellation.Token));
+        Assert.Equal(2, repository.Requests.Count(request => request.Method == HttpMethod.Put));
+        Assert.Equal(before.OrderBy(pair => pair.Key), repository.Resources.OrderBy(pair => pair.Key));
+    }
+
     [Fact]
     public async Task CreatesTemplateDocumentsAndRegistersRepositoryAndRegistryRecords()
     {
@@ -152,6 +194,7 @@ public sealed class AasProvisioningTests
     private sealed class RevisionHandler : HttpMessageHandler
     {
         private readonly Dictionary<string, string> resources = new(StringComparer.Ordinal);
+        public IReadOnlyDictionary<string, string> Resources => resources;
         public List<CapturedRequest> Requests { get; } = [];
 
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
@@ -163,6 +206,11 @@ public sealed class AasProvisioningTests
                 return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(JsonSerializer.Serialize(new { access_token = "test-aas-token", expires_in = 300 }), Encoding.UTF8, "application/json") };
             if (request.Method == HttpMethod.Get && resources.TryGetValue(path, out var existing))
                 return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(existing, Encoding.UTF8, "application/json") };
+            if (request.Method == HttpMethod.Delete)
+            {
+                resources.Remove(path);
+                return new HttpResponseMessage(HttpStatusCode.NoContent);
+            }
             if (request.Method == HttpMethod.Put)
             {
                 if (!resources.ContainsKey(path)) return new HttpResponseMessage(HttpStatusCode.NotFound);
@@ -183,6 +231,20 @@ public sealed class AasProvisioningTests
                 return new HttpResponseMessage(HttpStatusCode.Created);
             }
             return new HttpResponseMessage(HttpStatusCode.NotFound);
+        }
+    }
+
+    private sealed class CancelWriteHandler(HttpMessageHandler inner, HttpMethod method, CancellationTokenSource cancellation) : DelegatingHandler(inner)
+    {
+        private int writes;
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+        {
+            if (request.Method == method && request.RequestUri!.AbsolutePath != "/token" && ++writes == 2)
+            {
+                cancellation.Cancel();
+                ct.ThrowIfCancellationRequested();
+            }
+            return base.SendAsync(request, ct);
         }
     }
 
