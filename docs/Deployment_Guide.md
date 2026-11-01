@@ -11,7 +11,7 @@ dotnet restore src/SmartFactory.sln -p:NuGetAudit=true -p:NuGetAuditMode=all -p:
 dotnet test src/SmartFactory.sln -c Release --no-restore
 ```
 
-The PostgreSQL tests require `TEST_DASHBOARD_DATABASE_CONNECTION` to point to a disposable local database whose name ends in `_e2e`; they refuse other storage. Full qualification also includes the frontend's bundle smoke, trusted MQTT path, dependency/image audit, browser gates and a disposable restore drill. Unit tests or a ready endpoint alone do not qualify a release. Retain exact source revisions, image ID/registry digest, architecture, migration digests and test evidence together under the workspace's `locals-tools/deployment-evidence`.
+The PostgreSQL tests require `TEST_DASHBOARD_DATABASE_CONNECTION` to point to a disposable local database whose name ends in `_e2e`; they refuse other storage. Full qualification also includes the frontend's bundle smoke, trusted MQTT path, dependency/image audit, browser gates and a disposable restore drill. Unit tests or a ready endpoint alone do not qualify a release. Retain exact source revisions, image ID/registry digest, architecture, migration digests and test evidence together under the workspace's `local-tools/deployment-evidence`.
 
 ## Approved production update
 
