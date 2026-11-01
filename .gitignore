@@ -85,9 +85,6 @@ Thumbs.db
 appsettings.Development.json
 appsettings.Local.json
 
-# Docker
-.dockerignore
-
 # User secrets
 secrets.json
 
