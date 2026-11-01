@@ -50,6 +50,8 @@ public sealed class IndustrialConnectivityTests
     [InlineData("endpoint-scheme")]
     [InlineData("secret-field")]
     [InlineData("source-mismatch")]
+    [InlineData("opcua-conflicting-namespace")]
+    [InlineData("opcua-invalid-node-id")]
     [InlineData("missing-simulation-identity")]
     [InlineData("invalid-simulation-identity")]
     [InlineData("modbus-width")]
@@ -89,6 +91,8 @@ public sealed class IndustrialConnectivityTests
             case "endpoint-scheme": first["endpoint"] = "https://localhost:4840"; break;
             case "secret-field": first["password"] = "not-a-wire-field"; break;
             case "source-mismatch": first["tags"]![0]!["source"] = new JsonObject { ["address"] = 5 }; break;
+            case "opcua-conflicting-namespace": first["tags"]![0]!["source"]!["nodeId"] = "ns=2;s=Pressure"; break;
+            case "opcua-invalid-node-id": first["tags"]![0]!["source"] = new JsonObject { ["nodeId"] = "ns=two;s=Pressure" }; break;
             case "missing-simulation-identity": first["mode"] = "simulated"; break;
             case "invalid-simulation-identity": first["mode"] = "simulated"; first["scenarioRunId"] = "contains spaces"; break;
             case "modbus-width": Connection(configuration, 1)["tags"]![0]!["source"]!["count"] = 1; break;

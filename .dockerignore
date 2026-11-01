@@ -1,0 +1,30 @@
+# Shared by the combined backend context and each standalone service build.
+# Runtime credentials and generated host outputs must never enter build layers.
+**/.git
+**/.env
+**/.env.*
+!**/.env*.example
+**/bin
+**/obj
+**/TestResults
+**/node_modules
+**/.nuget
+**/packages
+**/*.backup
+**/*.bak
+**/*.pfx
+**/*.p12
+**/*.pem
+**/*.key
+**/secrets.json
+**/local.settings.json
+**/appsettings.*.json
+**/.terraform
+**/*.tfstate
+**/*.tfstate.*
+**/*.tfvars
+**/*.tfplan
+**/.aws
+**/.codex
+**/.agents
+**/.DS_Store

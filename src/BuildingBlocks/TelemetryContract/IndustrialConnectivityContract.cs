@@ -22,6 +22,9 @@ internal static class IndustrialConnectivityContract
     private static readonly Regex Property = new("\\A[A-Za-z][A-Za-z0-9_.-]{0,63}\\z", RegexOptions.CultureInvariant);
     private static readonly Regex Code = new("\\A[A-Za-z0-9_.:-]{1,128}\\z", RegexOptions.CultureInvariant);
     private static readonly Regex Interface = new("\\A[A-Za-z0-9][A-Za-z0-9_.:-]{0,14}\\z", RegexOptions.CultureInvariant);
+    private const string OpcIdentifierPattern = "(?:i=[0-9]{1,10}|s=.{1,510}|g=[0-9a-fA-F-]{36}|b=[A-Za-z0-9+/=]+)";
+    private static readonly Regex StableOpcNodeId = new("\\A" + OpcIdentifierPattern + "\\z", RegexOptions.CultureInvariant);
+    private static readonly Regex IndexedOpcNodeId = new("\\A(?:ns=[0-9]{1,5};)?" + OpcIdentifierPattern + "\\z", RegexOptions.CultureInvariant);
     private static readonly Regex Utc = new("\\A(?!0000)([0-9]{4})-([0-9]{2})-([0-9]{2})T([0-9]{2}):([0-9]{2}):([0-9]{2})(?:\\.([0-9]{1,9}))?Z\\z", RegexOptions.CultureInvariant);
     private static readonly Regex UuidIdentity = new("\\A(?:[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)\\z", RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
     private static readonly string[] Types = ["boolean", "int16", "uint16", "int32", "uint32", "int64", "uint64", "float32", "float64", "string"];
@@ -107,8 +110,10 @@ internal static class IndustrialConnectivityContract
             if (protocol is "opcua" || protocol == "opcua_fx" && fxMode == "diagnostics")
             {
                 Shape(source, ["nodeId"], ["namespaceUri"]);
-                Text(source, "nodeId", 512);
+                var nodeId = Text(source, "nodeId", 512);
                 OptionalText(source, "namespaceUri", 256);
+                Require((source.TryGetProperty("namespaceUri", out _) ? StableOpcNodeId : IndexedOpcNodeId).IsMatch(nodeId),
+                    "OPC UA node identity must use either its namespace URI or an index, with a valid identifier.");
             }
             else if (protocol is "modbus_tcp" or "modbus_rtu")
             {

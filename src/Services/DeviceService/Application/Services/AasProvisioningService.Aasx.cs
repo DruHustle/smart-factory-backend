@@ -67,8 +67,10 @@ public sealed partial class AasProvisioningService
         }
         catch (Exception error)
         {
-            await RollbackRecordsAsync(createdDescriptors, createdShells, createdSubmodels, createdConcepts, ct);
-            if (packageId is not null) await DeletePackageIfPresentAsync(packageId, ct);
+            using var recovery = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            await RollbackRecordsAsync(createdDescriptors, createdShells, createdSubmodels, createdConcepts, recovery.Token);
+            if (packageId is not null) await DeletePackageIfPresentAsync(packageId, recovery.Token);
+            if (error is OperationCanceledException) throw;
             throw new InvalidOperationException("AASX repository or package-service registration failed.", error);
         }
     }

@@ -45,7 +45,11 @@ public sealed partial class AasProvisioningService(HttpClient http, IConfigurati
         }
         catch (Exception error)
         {
-            await TryRollbackAsync(input.AssetId, submodelsCreated, shellCreated, descriptorCreated, ct);
+            // A disconnected caller must not cancel compensation of confirmed writes.
+            // Bound cleanup separately so an unavailable repository cannot hold the request forever.
+            using var recovery = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            await TryRollbackAsync(input.AssetId, submodelsCreated, shellCreated, descriptorCreated, recovery.Token);
+            if (error is OperationCanceledException) throw;
             throw new InvalidOperationException("AAS repository or registry registration failed.", error);
         }
     }
@@ -91,9 +95,10 @@ public sealed partial class AasProvisioningService(HttpClient http, IConfigurati
         }
         catch (Exception error)
         {
+            using var recovery = new CancellationTokenSource(TimeSpan.FromSeconds(30));
             foreach (var resource in updated.AsEnumerable().Reverse())
             {
-                try { await SendJsonAsync(HttpMethod.Put, resource.Uri, resource.Payload, ct); }
+                try { await SendJsonAsync(HttpMethod.Put, resource.Uri, resource.Payload, recovery.Token); }
                 catch (Exception rollbackError) { logger.LogError(rollbackError, "AAS revision rollback failed for {ResourcePath}.", resource.Uri.AbsolutePath); }
             }
             if (error is HttpRequestException { StatusCode: HttpStatusCode.Conflict or HttpStatusCode.PreconditionFailed })

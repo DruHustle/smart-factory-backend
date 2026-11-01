@@ -27,14 +27,15 @@ public sealed class NotificationDeliveryWorker(DashboardStore store, IServiceSco
         WHERE id=(SELECT id FROM notification_inbox WHERE
           ("emailStatus" IN ('pending','retrying','processing') OR ($1 AND "emailStatus"='unconfigured'))
           AND "nextAttemptAt"<=now() ORDER BY id FOR UPDATE SKIP LOCKED LIMIT 1)
-        RETURNING id, "userId", kind, title, body, attempts
+        RETURNING id, "userId", kind, title, body, attempts, "nextAttemptAt"
         """;
         await using var command = store.Source.CreateCommand(claim);
         command.Parameters.AddWithValue(sender.Configured);
-        long id; int userId; string kind; string title; string body; int attempts;
+        long id; int userId; string kind; string title; string body; int attempts; DateTimeOffset leaseUntil;
         await using (var reader = await command.ExecuteReaderAsync(ct)) {
             if (!await reader.ReadAsync(ct)) return false;
             id = reader.GetInt64(0); userId = reader.GetInt32(1); kind = reader.GetString(2); title = reader.GetString(3); body = reader.GetString(4); attempts = reader.GetInt32(5);
+            leaseUntil = reader.GetFieldValue<DateTimeOffset>(6);
         }
         var user = await store.GetUser(userId, ct);
         var state = "accepted"; string? failure = null;
@@ -58,14 +59,16 @@ public sealed class NotificationDeliveryWorker(DashboardStore store, IServiceSco
                     : sender.Provider + " delivery request failed or timed out.";
             }
         }
+        // A delayed sender must not overwrite a newer claim or an operator's terminal state.
         await using var update = store.Source.CreateCommand("""
         UPDATE notification_inbox SET "emailStatus"=$2, "lastError"=$3,
           "nextAttemptAt"=now()+make_interval(secs => $4), "acceptedAt"=CASE WHEN $2='accepted' THEN now() ELSE NULL END
-        WHERE id=$1
+        WHERE id=$1 AND attempts=$5 AND "nextAttemptAt"=$6 AND "emailStatus"='processing'
         """);
         update.Parameters.AddWithValue(id); update.Parameters.AddWithValue(state);
         update.Parameters.AddWithValue((object?)failure ?? DBNull.Value);
         update.Parameters.AddWithValue(Math.Min(3600, 30 * (1 << Math.Min(attempts, 7))));
+        update.Parameters.AddWithValue(attempts); update.Parameters.AddWithValue(leaseUntil);
         await update.ExecuteNonQueryAsync(ct);
         return true;
     }
