@@ -116,6 +116,16 @@ public sealed class EdgeConfigurationWireTests
     }
 
     [Fact]
+    public void QosEndpointRequiresEngineerOrAdministrator()
+    {
+        var method = typeof(SmartFactory.Services.DeviceService.API.Controllers.AssetsController).GetMethod("ConfigureMqttQos");
+        Assert.NotNull(method);
+        var authorization = Assert.Single(method.GetCustomAttributes(typeof(Microsoft.AspNetCore.Authorization.AuthorizeAttribute), false));
+        var roles = ((Microsoft.AspNetCore.Authorization.AuthorizeAttribute)authorization).Roles;
+        Assert.Equal("engineer,admin", roles);
+    }
+
+    [Fact]
     public void QosRequestRejectsExpiredOrInvalidFields()
     {
         var valid = new QosConfigurationRequest(1, "pi-edge-01", "wrover", 1, 1, 1, "qos-test-0001", 1_000_005_000);
