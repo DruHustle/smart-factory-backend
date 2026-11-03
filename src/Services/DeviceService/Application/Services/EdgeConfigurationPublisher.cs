@@ -230,8 +230,9 @@ public sealed partial class EdgeConfigurationPublisher(IConfiguration configurat
         await client.ConnectAsync(builder.Build(), ct);
         try
         {
-            // Configuration uses a reliable, non-retained control envelope; the selected
-            // level applies only after each participant confirms its data subscription.
+            // Configuration is published non-retained at QoS 1. A subscriber
+            // set to QoS 0 can lower actual delivery, so publication is not
+            // application; each participant must confirm its subscription.
             var message = new MqttApplicationMessageBuilder().WithTopic(topic).WithPayload(command)
                 .WithQualityOfServiceLevel(MqttQualityOfServiceLevel.AtLeastOnce).WithRetainFlag(false).Build();
             var result = await client.PublishAsync(message, ct);
