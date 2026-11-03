@@ -7,7 +7,7 @@ namespace SmartFactory.Tests;
 public sealed class MqttQosPolicyTests
 {
     [Theory]
-    [InlineData(null, MqttQualityOfServiceLevel.AtLeastOnce)]
+    [InlineData(null, MqttQualityOfServiceLevel.ExactlyOnce)]
     [InlineData("0", MqttQualityOfServiceLevel.AtMostOnce)]
     [InlineData("1", MqttQualityOfServiceLevel.AtLeastOnce)]
     [InlineData("2", MqttQualityOfServiceLevel.ExactlyOnce)]
@@ -27,6 +27,17 @@ public sealed class MqttQosPolicyTests
         Assert.True(MqttTelemetrySubscriberService.CompatibleQosAckTopic("factory/site/line/gateway/commands/ack".Split('/')));
         Assert.False(MqttTelemetrySubscriberService.CompatibleQosAckTopic("factory/site/line/gateway/commands".Split('/')));
         Assert.False(MqttTelemetrySubscriberService.CompatibleQosAckTopic("factory/site/line/%2F/commands/ack".Split('/')));
+    }
+
+    [Theory]
+    [InlineData("{\"action\":\"configure_mqtt_qos\",\"gatewayDeviceId\":\"pi\",\"status\":\"applied\"}", true)]
+    [InlineData("{\"action\":\"configure_mqtt_qos\",\"gatewayDeviceId\":\"other\",\"status\":\"applied\"}", false)]
+    [InlineData("{\"action\":\"configure_mqtt_qos\",\"gatewayDeviceId\":\"pi\",\"status\":\"queued\"}", false)]
+    [InlineData("{\"action\":\"configure_mqtt_qos\",\"gatewayDeviceId\":\"pi\",\"status\":\"applied\",\"status\":\"rejected\"}", false)]
+    public void FiltersQoSAcknowledgementsByGatewayAndUniqueFields(string json, bool expected)
+    {
+        using var document = System.Text.Json.JsonDocument.Parse(json);
+        Assert.Equal(expected, MqttTelemetrySubscriberService.CompatibleQosAckPayload(document.RootElement, "pi"));
     }
 
     [Fact]

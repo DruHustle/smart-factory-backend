@@ -35,6 +35,7 @@ namespace SmartFactory.Services.TelemetryService.Infrastructure.Services
         private readonly MqttEvidenceTransport _transport;
 
         public bool IsSubscriptionReady => _mqttClient.IsConnected && Volatile.Read(ref _subscriptionReady) == 1;
+        public int? GrantedTelemetryQos => IsSubscriptionReady ? (int)_uplinkQos : null;
 
         public MqttTelemetrySubscriberService(IServiceProvider serviceProvider, IConfiguration configuration, IHostEnvironment environment, ILogger<MqttTelemetrySubscriberService> logger)
         {
@@ -79,9 +80,9 @@ namespace SmartFactory.Services.TelemetryService.Infrastructure.Services
 
         public static MqttQualityOfServiceLevel ParseUplinkQos(string? value) => value switch
         {
-            null or "1" => MqttQualityOfServiceLevel.AtLeastOnce,
+            null or "2" => MqttQualityOfServiceLevel.ExactlyOnce,
             "0" => MqttQualityOfServiceLevel.AtMostOnce,
-            "2" => MqttQualityOfServiceLevel.ExactlyOnce,
+            "1" => MqttQualityOfServiceLevel.AtLeastOnce,
             _ => throw new InvalidOperationException("MqttUplinkQos must be 0, 1, or 2."),
         };
 
@@ -234,17 +235,22 @@ namespace SmartFactory.Services.TelemetryService.Infrastructure.Services
             parts[4] == "commands" && parts[5] == "ack" && parts.Skip(1).Take(3).All(p => TopicIdentity.TryDecode(p, out _)) &&
             System.Text.Encoding.UTF8.GetByteCount(string.Join("/", parts)) <= 255;
 
+        public static bool CompatibleQosAckPayload(JsonElement root, string topicGateway)
+        {
+            if (root.ValueKind != JsonValueKind.Object ||
+                !root.TryGetProperty("action", out var action) || action.ValueKind != JsonValueKind.String || action.GetString() != "configure_mqtt_qos" ||
+                !root.TryGetProperty("gatewayDeviceId", out var gateway) || gateway.ValueKind != JsonValueKind.String || gateway.GetString() != topicGateway ||
+                !root.TryGetProperty("status", out var status) || status.ValueKind != JsonValueKind.String || status.GetString() is not ("applied" or "rejected")) return false;
+            var fields = root.EnumerateObject().Select(p => p.Name).ToArray();
+            var allowed = new HashSet<string> { "action", "deviceId", "gatewayDeviceId", "targetDeviceId", "commandId", "status", "timestamp", "revision", "requestedRevision", "uplinkQos", "downlinkQos", "reason" };
+            return fields.Distinct(StringComparer.Ordinal).Count() == fields.Length && fields.All(allowed.Contains);
+        }
+
         private async Task ForwardQosAckAsync(IServiceProvider services, string topicGateway, string message, CancellationToken cancellationToken)
         {
             using var document = JsonDocument.Parse(message);
             var root = document.RootElement;
-            if (root.ValueKind != JsonValueKind.Object ||
-                !root.TryGetProperty("action", out var action) || action.ValueKind != JsonValueKind.String || action.GetString() != "configure_mqtt_qos" ||
-                !root.TryGetProperty("gatewayDeviceId", out var gateway) || gateway.ValueKind != JsonValueKind.String || gateway.GetString() != topicGateway)
-                return; // Other command receipts use this shared topic.
-            var fields = root.EnumerateObject().Select(p => p.Name).ToArray();
-            var allowed = new HashSet<string> { "action", "deviceId", "gatewayDeviceId", "commandId", "status", "timestamp", "revision", "uplinkQos", "downlinkQos", "reason" };
-            if (fields.Distinct(StringComparer.Ordinal).Count() != fields.Length || fields.Any(field => !allowed.Contains(field))) return;
+            if (!CompatibleQosAckPayload(root, topicGateway)) return; // Other command receipts share this topic.
             var telemetrySink = Environment.GetEnvironmentVariable("INTERNAL_TELEMETRY_SINK_URL");
             var token = Environment.GetEnvironmentVariable("INGESTION_API_TOKEN");
             if (string.IsNullOrWhiteSpace(telemetrySink) || string.IsNullOrWhiteSpace(token))

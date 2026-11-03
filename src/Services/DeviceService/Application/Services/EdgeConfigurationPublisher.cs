@@ -150,7 +150,7 @@ public sealed partial class EdgeConfigurationPublisher(IConfiguration configurat
         if (request.SchemaVersion != 1 || !SafeTopicPart.IsMatch(request.GatewayDeviceId) ||
             !SafeTopicPart.IsMatch(request.TargetDeviceId) ||
             !Regex.IsMatch(request.CommandId, "^[A-Za-z0-9_.-]{8,64}$", RegexOptions.CultureInvariant) ||
-            request.Pin != 18 || request.Value is not (0 or 1) || request.HoldMs is < 1 or > 2_000)
+            request.Pin != 18 || request.Value is not (0 or 1) || request.HoldMs is < 1 or > 2_000 || request.Qos is < 0 or > 2)
             throw new ArgumentException("WROVER indicator command fields are invalid.");
 
         var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
@@ -185,7 +185,7 @@ public sealed partial class EdgeConfigurationPublisher(IConfiguration configurat
         try
         {
             var message = new MqttApplicationMessageBuilder().WithTopic(topic).WithPayload(command)
-                .WithQualityOfServiceLevel(MqttQualityOfServiceLevel.AtLeastOnce).WithRetainFlag(false).Build();
+                .WithQualityOfServiceLevel((MqttQualityOfServiceLevel)(request.Qos ?? 1)).WithRetainFlag(false).Build();
             var result = await client.PublishAsync(message, ct);
             if (!result.IsSuccess) throw new IOException($"MQTT broker rejected the GPIO command ({result.ReasonCode}).");
         }
@@ -317,6 +317,6 @@ public sealed record Ada031ControlRequest
     public string CommandId { get; init; } = "";
     public long ExpiresAt { get; init; }
 }
-public sealed record GpioControlRequest(int SchemaVersion, string GatewayDeviceId, string TargetDeviceId, int Pin, int Value, int HoldMs, string CommandId, long ExpiresAt);
+public sealed record GpioControlRequest(int SchemaVersion, string GatewayDeviceId, string TargetDeviceId, int Pin, int Value, int HoldMs, string CommandId, long ExpiresAt, int? Qos = null);
 
 public sealed record QosConfigurationRequest(int SchemaVersion, string GatewayDeviceId, string TargetDeviceId, uint Revision, int UplinkQos, int DownlinkQos, string CommandId, long ExpiresAt);

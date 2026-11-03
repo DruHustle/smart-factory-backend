@@ -62,7 +62,7 @@ public sealed class WorkerStatusService(IServiceScopeFactory scopes,IHttpClientF
                 var source=Environment.GetEnvironmentVariable("BACKEND_SOURCE_REVISION");
                 if(source is not null&&!System.Text.RegularExpressions.Regex.IsMatch(source,"^[a-f0-9]{40}$"))source=null;
                 var report=new {worker="telemetry",source,runtime=Environment.Version.ToString(),contractVersion=2,
-                    migrationsDigest=await TelemetryMigrations.DigestAsync(),mqttSubscribed=subscriber.IsSubscriptionReady,
+                    migrationsDigest=await TelemetryMigrations.DigestAsync(),mqttSubscribed=subscriber.IsSubscriptionReady,mqttMaxQos=subscriber.GrantedTelemetryQos,
                     observedAt=DateTime.UtcNow,pending=metrics?.pending??0,quarantined=metrics?.quarantined??0,
                     failedAttempts=metrics?.failedAttempts??0,oldestPendingAt=metrics?.oldestPendingAt,
                     notificationReady,resources=new {residentBytes=process.WorkingSet64,cpuMsPerSecond,databaseQueryMs=queryTimer.Elapsed.TotalMilliseconds}};
