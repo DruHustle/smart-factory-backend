@@ -27,9 +27,21 @@ variable "oci_auth" {
 }
 
 variable "instance_name" {
-  description = "Display name and hostname for the BaSyx host."
+  description = "Legacy VNIC DNS and guest hostname. Preserve the existing value when changing display names."
   type        = string
   default     = "basyx-server"
+}
+
+variable "instance_display_name" {
+  description = "OCI console display name for the shared backend instance; does not change its hostname."
+  type        = string
+  default     = "Software Engineering Backend"
+}
+
+variable "resource_name_prefix" {
+  description = "OCI display-name prefix for the instance's network resources; does not change DNS labels or resource identities."
+  type        = string
+  default     = "software-engineering-backend"
 }
 
 variable "availability_domain_number" {

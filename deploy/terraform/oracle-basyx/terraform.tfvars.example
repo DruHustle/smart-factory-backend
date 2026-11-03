@@ -2,6 +2,12 @@ tenancy_ocid        = "ocid1.tenancy.oc1..replace_me"
 compartment_ocid    = "ocid1.compartment.oc1..replace_me"
 ssh_ingress_cidr    = "203.0.113.10/32"
 
+# Display labels are independent of the existing VNIC DNS and guest hostname.
+instance_display_name = "Software Engineering Backend"
+resource_name_prefix  = "software-engineering-backend"
+# Preserve the actual deployed hostname when updating an existing installation.
+instance_name         = "basyx-server"
+
 # Defaults shown explicitly for review.
 region              = "eu-frankfurt-1"
 oci_profile         = "DEFAULT"

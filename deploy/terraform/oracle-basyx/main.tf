@@ -19,21 +19,21 @@ locals {
 resource "oci_core_vcn" "basyx" {
   compartment_id = var.compartment_ocid
   cidr_blocks    = ["10.42.0.0/16"]
-  display_name   = "${var.instance_name}-vcn"
+  display_name   = "${var.resource_name_prefix}-vcn"
   dns_label      = "basyxvcn"
 }
 
 resource "oci_core_internet_gateway" "basyx" {
   compartment_id = var.compartment_ocid
   vcn_id         = oci_core_vcn.basyx.id
-  display_name   = "${var.instance_name}-internet-gateway"
+  display_name   = "${var.resource_name_prefix}-internet-gateway"
   enabled        = true
 }
 
 resource "oci_core_route_table" "public" {
   compartment_id = var.compartment_ocid
   vcn_id         = oci_core_vcn.basyx.id
-  display_name   = "${var.instance_name}-public-routes"
+  display_name   = "${var.resource_name_prefix}-public-routes"
 
   route_rules {
     destination       = "0.0.0.0/0"
@@ -45,7 +45,7 @@ resource "oci_core_route_table" "public" {
 resource "oci_core_security_list" "basyx" {
   compartment_id = var.compartment_ocid
   vcn_id         = oci_core_vcn.basyx.id
-  display_name   = "${var.instance_name}-security-list"
+  display_name   = "${var.resource_name_prefix}-security-list"
 
   ingress_security_rules {
     protocol = "6"
@@ -77,7 +77,7 @@ resource "oci_core_subnet" "public" {
   compartment_id             = var.compartment_ocid
   vcn_id                     = oci_core_vcn.basyx.id
   cidr_block                 = "10.42.1.0/24"
-  display_name               = "${var.instance_name}-public-subnet"
+  display_name               = "${var.resource_name_prefix}-public-subnet"
   dns_label                  = "basyx"
   prohibit_public_ip_on_vnic = false
   route_table_id             = oci_core_route_table.public.id
@@ -87,7 +87,7 @@ resource "oci_core_subnet" "public" {
 resource "oci_core_instance" "basyx" {
   availability_domain = local.availability_domain
   compartment_id      = var.compartment_ocid
-  display_name        = var.instance_name
+  display_name        = var.instance_display_name
   shape               = "VM.Standard.A1.Flex"
 
   shape_config {
@@ -97,7 +97,7 @@ resource "oci_core_instance" "basyx" {
 
   create_vnic_details {
     assign_public_ip = true
-    display_name     = "${var.instance_name}-vnic"
+    display_name     = "${var.resource_name_prefix}-vnic"
     hostname_label   = var.instance_name
     subnet_id        = oci_core_subnet.public.id
   }
