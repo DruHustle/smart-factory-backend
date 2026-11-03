@@ -1,0 +1,8 @@
+# Keep real runtime inputs outside this checkout and all image contexts.
+*.env
+*.pem
+*.key
+*.crt
+*.dump
+*.sql
+private/
