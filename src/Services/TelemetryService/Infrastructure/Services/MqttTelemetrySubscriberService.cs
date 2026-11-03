@@ -24,21 +24,25 @@ namespace SmartFactory.Services.TelemetryService.Infrastructure.Services
         private readonly int _port;
         private readonly string _topic;
         private readonly string _heartbeatTopic;
+        private readonly string _qosAckTopic;
         private readonly string? _username;
         private readonly string? _password;
         private readonly bool _useTls;
         private readonly string _clientId;
         private readonly bool _cleanSession;
+        private readonly MqttQualityOfServiceLevel _uplinkQos;
         private int _subscriptionReady;
         private readonly MqttEvidenceTransport _transport;
 
         public bool IsSubscriptionReady => _mqttClient.IsConnected && Volatile.Read(ref _subscriptionReady) == 1;
+        public int? GrantedTelemetryQos => IsSubscriptionReady ? (int)_uplinkQos : null;
 
         public MqttTelemetrySubscriberService(IServiceProvider serviceProvider, IConfiguration configuration, IHostEnvironment environment, ILogger<MqttTelemetrySubscriberService> logger)
         {
             static string? FirstConfigured(string? primary, string? secondary) =>
                 !string.IsNullOrWhiteSpace(primary) ? primary : !string.IsNullOrWhiteSpace(secondary) ? secondary : null;
 
+            _uplinkQos = ParseUplinkQos(FirstConfigured(configuration["Mqtt:UplinkQos"], Environment.GetEnvironmentVariable("MqttUplinkQos")));
             _transport = MqttEvidenceTransport.Parse(FirstConfigured(configuration["Mqtt:ProtocolVersion"], Environment.GetEnvironmentVariable("MqttProtocolVersion")));
             _serviceProvider = serviceProvider;
             _logger = logger;
@@ -50,6 +54,7 @@ namespace SmartFactory.Services.TelemetryService.Infrastructure.Services
                 throw new InvalidOperationException("MQTT broker port must be an integer from 1 to 65535.");
             _topic = FirstConfigured(configuration["Mqtt:Topic"], Environment.GetEnvironmentVariable("MqttTopic")) ?? "factory/+/+/+/telemetry";
             _heartbeatTopic = FirstConfigured(configuration["Mqtt:HeartbeatTopic"], Environment.GetEnvironmentVariable("MqttHeartbeatTopic")) ?? "factory/+/+/+/heartbeat";
+            _qosAckTopic = FirstConfigured(configuration["Mqtt:QosAckTopic"], Environment.GetEnvironmentVariable("MqttQosAckTopic")) ?? "factory/+/+/+/commands/ack";
             _username = FirstConfigured(configuration["Mqtt:Username"], Environment.GetEnvironmentVariable("MqttUsername"));
             _password = FirstConfigured(configuration["Mqtt:Password"], Environment.GetEnvironmentVariable("MqttPassword"));
             var tlsValue = FirstConfigured(configuration["Mqtt:UseTls"], Environment.GetEnvironmentVariable("MqttUseTls"));
@@ -72,6 +77,17 @@ namespace SmartFactory.Services.TelemetryService.Infrastructure.Services
                 _clientId = $"smart-factory-telemetry-dev-{Environment.MachineName}";
             }
         }
+
+        public static MqttQualityOfServiceLevel ParseUplinkQos(string? value) => value switch
+        {
+            null or "2" => MqttQualityOfServiceLevel.ExactlyOnce,
+            "0" => MqttQualityOfServiceLevel.AtMostOnce,
+            "1" => MqttQualityOfServiceLevel.AtLeastOnce,
+            _ => throw new InvalidOperationException("MqttUplinkQos must be 0, 1, or 2."),
+        };
+
+        public static bool IsRequestedGrant(MqttClientSubscribeResultCode grant, MqttQualityOfServiceLevel requested) =>
+            grant.ToString().Equals($"GrantedQoS{(int)requested}", StringComparison.OrdinalIgnoreCase);
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
@@ -96,6 +112,15 @@ namespace SmartFactory.Services.TelemetryService.Infrastructure.Services
                 {
                     using var scope = _serviceProvider.CreateScope();
                     var parts = e.ApplicationMessage.Topic.Split('/');
+                    if (CompatibleQosAckTopic(parts))
+                    {
+                        if (!_transport.PreservesRetainFlags) { await e.AcknowledgeAsync(stoppingToken); return; }
+                        if (!IsSubscriptionReady) throw new InvalidOperationException("QoS acknowledgement arrived before subscription verification.");
+                        if (!e.ApplicationMessage.Retain)
+                            await ForwardQosAckAsync(scope.ServiceProvider, TopicIdentity.Decode(parts[3]), message, stoppingToken);
+                        await e.AcknowledgeAsync(stoppingToken);
+                        return;
+                    }
                     if(!CompatibleTopic(parts)) { _logger.LogWarning("Rejected MQTT topic outside the compatible identity contract.");await e.AcknowledgeAsync(stoppingToken);return; }
                     if (parts.Length == 5 && parts[0] == "factory" && parts[4] == "heartbeat")
                     {
@@ -158,15 +183,20 @@ namespace SmartFactory.Services.TelemetryService.Infrastructure.Services
                     {
                         await _mqttClient.ConnectAsync(options, stoppingToken);
                         var subscription = await _mqttClient.SubscribeAsync(new MqttTopicFilterBuilder().WithTopic(_topic)
-                            .WithQualityOfServiceLevel(MqttQualityOfServiceLevel.AtLeastOnce).WithRetainAsPublished(_transport.PreservesRetainFlags).Build(), stoppingToken);
+                            .WithQualityOfServiceLevel(_uplinkQos).WithRetainAsPublished(_transport.PreservesRetainFlags).Build(), stoppingToken);
                         if (subscription.Items.Count == 0 || subscription.Items.Any(item =>
-                                !item.ResultCode.ToString().StartsWith("GrantedQoS", StringComparison.OrdinalIgnoreCase)))
+                                !IsRequestedGrant(item.ResultCode, _uplinkQos)))
                             throw new InvalidOperationException("MQTT broker rejected the telemetry topic subscription.");
                         var heartbeatSubscription = await _mqttClient.SubscribeAsync(new MqttTopicFilterBuilder().WithTopic(_heartbeatTopic)
-                            .WithQualityOfServiceLevel(MqttQualityOfServiceLevel.AtLeastOnce).WithRetainAsPublished(_transport.PreservesRetainFlags).Build(), stoppingToken);
+                            .WithQualityOfServiceLevel(_uplinkQos).WithRetainAsPublished(_transport.PreservesRetainFlags).Build(), stoppingToken);
                         if (heartbeatSubscription.Items.Count == 0 || heartbeatSubscription.Items.Any(item =>
-                                !item.ResultCode.ToString().StartsWith("GrantedQoS", StringComparison.OrdinalIgnoreCase)))
+                                !IsRequestedGrant(item.ResultCode, _uplinkQos)))
                             throw new InvalidOperationException("MQTT broker rejected the heartbeat topic subscription.");
+                        var qosAckSubscription = await _mqttClient.SubscribeAsync(new MqttTopicFilterBuilder().WithTopic(_qosAckTopic)
+                            .WithQualityOfServiceLevel(MqttQualityOfServiceLevel.AtLeastOnce).WithRetainAsPublished(_transport.PreservesRetainFlags).Build(), stoppingToken);
+                        if (qosAckSubscription.Items.Count == 0 || qosAckSubscription.Items.Any(item =>
+                                !IsRequestedGrant(item.ResultCode, MqttQualityOfServiceLevel.AtLeastOnce)))
+                            throw new InvalidOperationException("MQTT broker rejected the QoS acknowledgement subscription.");
                         Interlocked.Exchange(ref _subscriptionReady, 1);
                         if (!_transport.PreservesRetainFlags)
                             _logger.LogWarning("MQTT 3.1.1 historical-only intake: retained delivery cannot be verified; telemetry and heartbeats cannot assert current state.");
@@ -200,6 +230,46 @@ namespace SmartFactory.Services.TelemetryService.Infrastructure.Services
         }
 
         public static bool CompatibleTopic(string[] parts) => parts.Length==5 && parts[0]=="factory" && parts[4] is "telemetry" or "heartbeat" && parts.Skip(1).Take(3).All(p=>TopicIdentity.TryDecode(p,out _)) && System.Text.Encoding.UTF8.GetByteCount(string.Join("/",parts))<=255;
+
+        public static bool CompatibleQosAckTopic(string[] parts) => parts.Length == 6 && parts[0] == "factory" &&
+            parts[4] == "commands" && parts[5] == "ack" && parts.Skip(1).Take(3).All(p => TopicIdentity.TryDecode(p, out _)) &&
+            System.Text.Encoding.UTF8.GetByteCount(string.Join("/", parts)) <= 255;
+
+        public static bool CompatibleQosAckPayload(JsonElement root, string topicGateway)
+        {
+            if (root.ValueKind != JsonValueKind.Object ||
+                !root.TryGetProperty("action", out var action) || action.ValueKind != JsonValueKind.String || action.GetString() != "configure_mqtt_qos" ||
+                !root.TryGetProperty("gatewayDeviceId", out var gateway) || gateway.ValueKind != JsonValueKind.String || gateway.GetString() != topicGateway ||
+                !root.TryGetProperty("status", out var status) || status.ValueKind != JsonValueKind.String || status.GetString() is not ("applied" or "rejected")) return false;
+            var fields = root.EnumerateObject().Select(p => p.Name).ToArray();
+            var allowed = new HashSet<string> { "action", "deviceId", "gatewayDeviceId", "targetDeviceId", "commandId", "status", "timestamp", "revision", "requestedRevision", "uplinkQos", "downlinkQos", "reason" };
+            return fields.Distinct(StringComparer.Ordinal).Count() == fields.Length && fields.All(allowed.Contains);
+        }
+
+        private async Task ForwardQosAckAsync(IServiceProvider services, string topicGateway, string message, CancellationToken cancellationToken)
+        {
+            using var document = JsonDocument.Parse(message);
+            var root = document.RootElement;
+            if (!CompatibleQosAckPayload(root, topicGateway)) return; // Other command receipts share this topic.
+            var telemetrySink = Environment.GetEnvironmentVariable("INTERNAL_TELEMETRY_SINK_URL");
+            var token = Environment.GetEnvironmentVariable("INGESTION_API_TOKEN");
+            if (string.IsNullOrWhiteSpace(telemetrySink) || string.IsNullOrWhiteSpace(token))
+                throw new InvalidOperationException("QoS acknowledgement bridge is not configured.");
+            var sink = new Uri(telemetrySink, UriKind.Absolute);
+            if (!sink.AbsolutePath.EndsWith("/api/internal/telemetry", StringComparison.Ordinal))
+                throw new InvalidOperationException("Telemetry sink must end in /api/internal/telemetry.");
+            var qosSink = new UriBuilder(sink) { Path = sink.AbsolutePath[..^"telemetry".Length] + "mqtt-qos-ack", Query = "", Fragment = "" }.Uri;
+            var fieldsToSend = root.EnumerateObject().ToDictionary(p => p.Name, p => (object)p.Value.Clone(), StringComparer.Ordinal);
+            fieldsToSend["transportRetained"] = false;
+            fieldsToSend["transportRetainVerified"] = true;
+            using var request = new HttpRequestMessage(HttpMethod.Post, qosSink);
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+            request.Content = JsonContent.Create(fieldsToSend);
+            using var client = services.GetRequiredService<IHttpClientFactory>().CreateClient("dashboard-ingestion");
+            using var response = await client.SendAsync(request, cancellationToken);
+            if (response.StatusCode is HttpStatusCode.BadRequest or HttpStatusCode.NotFound) return;
+            response.EnsureSuccessStatusCode();
+        }
 
         private async Task ForwardHeartbeatAsync(IServiceProvider services, string topicDeviceId, string message, bool retained, bool retainVerified, CancellationToken cancellationToken)
         {

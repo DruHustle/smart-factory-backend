@@ -150,7 +150,7 @@ public sealed partial class EdgeConfigurationPublisher(IConfiguration configurat
         if (request.SchemaVersion != 1 || !SafeTopicPart.IsMatch(request.GatewayDeviceId) ||
             !SafeTopicPart.IsMatch(request.TargetDeviceId) ||
             !Regex.IsMatch(request.CommandId, "^[A-Za-z0-9_.-]{8,64}$", RegexOptions.CultureInvariant) ||
-            request.Pin != 18 || request.Value is not (0 or 1) || request.HoldMs is < 1 or > 2_000)
+            request.Pin != 18 || request.Value is not (0 or 1) || request.HoldMs is < 1 or > 2_000 || request.Qos is < 0 or > 2)
             throw new ArgumentException("WROVER indicator command fields are invalid.");
 
         var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
@@ -185,9 +185,57 @@ public sealed partial class EdgeConfigurationPublisher(IConfiguration configurat
         try
         {
             var message = new MqttApplicationMessageBuilder().WithTopic(topic).WithPayload(command)
-                .WithQualityOfServiceLevel(MqttQualityOfServiceLevel.AtLeastOnce).WithRetainFlag(false).Build();
+                .WithQualityOfServiceLevel((MqttQualityOfServiceLevel)(request.Qos ?? 1)).WithRetainFlag(false).Build();
             var result = await client.PublishAsync(message, ct);
             if (!result.IsSuccess) throw new IOException($"MQTT broker rejected the GPIO command ({result.ReasonCode}).");
+        }
+        finally
+        {
+            if (client.IsConnected) await client.DisconnectAsync(new MqttClientDisconnectOptionsBuilder().Build(), ct);
+        }
+    }
+
+    public static byte[] BuildQosConfigurationCommand(QosConfigurationRequest request, long now)
+    {
+        if (request is null || request.SchemaVersion != 1 || request.Revision == 0 ||
+            string.IsNullOrWhiteSpace(request.GatewayDeviceId) || !SafeTopicPart.IsMatch(request.GatewayDeviceId) ||
+            string.IsNullOrWhiteSpace(request.TargetDeviceId) || !SafeTopicPart.IsMatch(request.TargetDeviceId) ||
+            string.IsNullOrWhiteSpace(request.CommandId) || !Regex.IsMatch(request.CommandId, "^[A-Za-z0-9_.-]{8,64}$", RegexOptions.CultureInvariant) ||
+            request.UplinkQos is < 0 or > 2 || request.DownlinkQos is < 0 or > 2 ||
+            request.ExpiresAt <= now || request.ExpiresAt > now + 30_000)
+            throw new ArgumentException("MQTT QoS request fields or expiry are invalid.");
+        return JsonSerializer.SerializeToUtf8Bytes(new
+        {
+            schemaVersion = 1, action = "configure_mqtt_qos", commandId = request.CommandId,
+            targetDeviceId = request.TargetDeviceId, revision = request.Revision,
+            uplinkQos = request.UplinkQos, downlinkQos = request.DownlinkQos, expiresAt = request.ExpiresAt,
+        });
+    }
+
+    public async Task PublishQosConfigurationAsync(QosConfigurationRequest request, CancellationToken ct)
+    {
+        var command = BuildQosConfigurationCommand(request, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+        var site = configuration["EDGE_SITE_ID"] ?? "factory-a";
+        var line = configuration["EDGE_LINE_ID"] ?? "line-1";
+        if (!SafeTopicPart.IsMatch(site) || !SafeTopicPart.IsMatch(line))
+            throw new InvalidOperationException("EDGE_SITE_ID and EDGE_LINE_ID must be safe MQTT topic segments.");
+        var topic = TopicIdentity.Build(site, line, request.GatewayDeviceId, "commands");
+        var broker = ResolveBroker();
+        var factory = new MqttFactory();
+        using var client = factory.CreateMqttClient();
+        var builder = new MqttClientOptionsBuilder().WithTcpServer(broker.Host, broker.Port)
+            .WithClientId($"smart-factory-qos-{Guid.NewGuid():N}").WithCleanSession().WithTimeout(TimeSpan.FromSeconds(10));
+        if (!string.IsNullOrWhiteSpace(broker.Username)) builder.WithCredentials(broker.Username, broker.Password ?? "");
+        if (broker.UseTls) builder.WithTlsOptions(options => options.UseTls());
+        await client.ConnectAsync(builder.Build(), ct);
+        try
+        {
+            // Configuration uses a reliable, non-retained control envelope; the selected
+            // level applies only after each participant confirms its data subscription.
+            var message = new MqttApplicationMessageBuilder().WithTopic(topic).WithPayload(command)
+                .WithQualityOfServiceLevel(MqttQualityOfServiceLevel.AtLeastOnce).WithRetainFlag(false).Build();
+            var result = await client.PublishAsync(message, ct);
+            if (!result.IsSuccess) throw new IOException($"MQTT broker rejected the QoS request ({result.ReasonCode}).");
         }
         finally
         {
@@ -269,4 +317,6 @@ public sealed record Ada031ControlRequest
     public string CommandId { get; init; } = "";
     public long ExpiresAt { get; init; }
 }
-public sealed record GpioControlRequest(int SchemaVersion, string GatewayDeviceId, string TargetDeviceId, int Pin, int Value, int HoldMs, string CommandId, long ExpiresAt);
+public sealed record GpioControlRequest(int SchemaVersion, string GatewayDeviceId, string TargetDeviceId, int Pin, int Value, int HoldMs, string CommandId, long ExpiresAt, int? Qos = null);
+
+public sealed record QosConfigurationRequest(int SchemaVersion, string GatewayDeviceId, string TargetDeviceId, uint Revision, int UplinkQos, int DownlinkQos, string CommandId, long ExpiresAt);

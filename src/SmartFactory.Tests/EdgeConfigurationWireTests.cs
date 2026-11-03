@@ -98,6 +98,43 @@ public sealed class EdgeConfigurationWireTests
             Request(action, joint, direction, profile)));
     }
 
+    [Theory]
+    [InlineData(0, 0)]
+    [InlineData(1, 2)]
+    [InlineData(2, 1)]
+    public void QosRequestMatchesGatewayWireContract(int uplink, int downlink)
+    {
+        var request = new QosConfigurationRequest(1, "pi-edge-01", "wrover", 7, uplink, downlink, "qos-test-0001", 1_000_005_000);
+        using var parsed = JsonDocument.Parse(EdgeConfigurationPublisher.BuildQosConfigurationCommand(request, 1_000_000_000));
+        var command = parsed.RootElement;
+        Assert.Equal("configure_mqtt_qos", command.GetProperty("action").GetString());
+        Assert.Equal("wrover", command.GetProperty("targetDeviceId").GetString());
+        Assert.Equal(7u, command.GetProperty("revision").GetUInt32());
+        Assert.Equal(uplink, command.GetProperty("uplinkQos").GetInt32());
+        Assert.Equal(downlink, command.GetProperty("downlinkQos").GetInt32());
+        Assert.Equal(8, command.EnumerateObject().Count());
+    }
+
+    [Fact]
+    public void QosEndpointRequiresEngineerOrAdministrator()
+    {
+        var method = typeof(SmartFactory.Services.DeviceService.API.Controllers.AssetsController).GetMethod("ConfigureMqttQos");
+        Assert.NotNull(method);
+        var authorization = Assert.Single(method.GetCustomAttributes(typeof(Microsoft.AspNetCore.Authorization.AuthorizeAttribute), false));
+        var roles = ((Microsoft.AspNetCore.Authorization.AuthorizeAttribute)authorization).Roles;
+        Assert.Equal("engineer,admin", roles);
+    }
+
+    [Fact]
+    public void QosRequestRejectsExpiredOrInvalidFields()
+    {
+        var valid = new QosConfigurationRequest(1, "pi-edge-01", "wrover", 1, 1, 1, "qos-test-0001", 1_000_005_000);
+        Assert.Throws<ArgumentException>(() => EdgeConfigurationPublisher.BuildQosConfigurationCommand(valid with { UplinkQos = 3 }, 1_000_000_000));
+        Assert.Throws<ArgumentException>(() => EdgeConfigurationPublisher.BuildQosConfigurationCommand(valid with { Revision = 0 }, 1_000_000_000));
+        Assert.Throws<ArgumentException>(() => EdgeConfigurationPublisher.BuildQosConfigurationCommand(valid with { ExpiresAt = 999_999_999 }, 1_000_000_000));
+        Assert.Throws<ArgumentException>(() => EdgeConfigurationPublisher.BuildQosConfigurationCommand(valid with { GatewayDeviceId = "bad/#" }, 1_000_000_000));
+    }
+
     private static Ada031ControlRequest Request(
         string? action,
         string? joint = null,
