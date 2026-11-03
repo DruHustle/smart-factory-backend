@@ -29,6 +29,7 @@ namespace SmartFactory.Services.TelemetryService.Infrastructure.Services
         private readonly bool _useTls;
         private readonly string _clientId;
         private readonly bool _cleanSession;
+        private readonly MqttQualityOfServiceLevel _uplinkQos;
         private int _subscriptionReady;
         private readonly MqttEvidenceTransport _transport;
 
@@ -39,6 +40,7 @@ namespace SmartFactory.Services.TelemetryService.Infrastructure.Services
             static string? FirstConfigured(string? primary, string? secondary) =>
                 !string.IsNullOrWhiteSpace(primary) ? primary : !string.IsNullOrWhiteSpace(secondary) ? secondary : null;
 
+            _uplinkQos = ParseUplinkQos(FirstConfigured(configuration["Mqtt:UplinkQos"], Environment.GetEnvironmentVariable("MqttUplinkQos")));
             _transport = MqttEvidenceTransport.Parse(FirstConfigured(configuration["Mqtt:ProtocolVersion"], Environment.GetEnvironmentVariable("MqttProtocolVersion")));
             _serviceProvider = serviceProvider;
             _logger = logger;
@@ -72,6 +74,17 @@ namespace SmartFactory.Services.TelemetryService.Infrastructure.Services
                 _clientId = $"smart-factory-telemetry-dev-{Environment.MachineName}";
             }
         }
+
+        public static MqttQualityOfServiceLevel ParseUplinkQos(string? value) => value switch
+        {
+            null or "1" => MqttQualityOfServiceLevel.AtLeastOnce,
+            "0" => MqttQualityOfServiceLevel.AtMostOnce,
+            "2" => MqttQualityOfServiceLevel.ExactlyOnce,
+            _ => throw new InvalidOperationException("MqttUplinkQos must be 0, 1, or 2."),
+        };
+
+        public static bool IsRequestedGrant(MqttClientSubscribeResultCode grant, MqttQualityOfServiceLevel requested) =>
+            grant.ToString().Equals($"GrantedQoS{(int)requested}", StringComparison.OrdinalIgnoreCase);
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
@@ -158,14 +171,14 @@ namespace SmartFactory.Services.TelemetryService.Infrastructure.Services
                     {
                         await _mqttClient.ConnectAsync(options, stoppingToken);
                         var subscription = await _mqttClient.SubscribeAsync(new MqttTopicFilterBuilder().WithTopic(_topic)
-                            .WithQualityOfServiceLevel(MqttQualityOfServiceLevel.AtLeastOnce).WithRetainAsPublished(_transport.PreservesRetainFlags).Build(), stoppingToken);
+                            .WithQualityOfServiceLevel(_uplinkQos).WithRetainAsPublished(_transport.PreservesRetainFlags).Build(), stoppingToken);
                         if (subscription.Items.Count == 0 || subscription.Items.Any(item =>
-                                !item.ResultCode.ToString().StartsWith("GrantedQoS", StringComparison.OrdinalIgnoreCase)))
+                                !IsRequestedGrant(item.ResultCode, _uplinkQos)))
                             throw new InvalidOperationException("MQTT broker rejected the telemetry topic subscription.");
                         var heartbeatSubscription = await _mqttClient.SubscribeAsync(new MqttTopicFilterBuilder().WithTopic(_heartbeatTopic)
-                            .WithQualityOfServiceLevel(MqttQualityOfServiceLevel.AtLeastOnce).WithRetainAsPublished(_transport.PreservesRetainFlags).Build(), stoppingToken);
+                            .WithQualityOfServiceLevel(_uplinkQos).WithRetainAsPublished(_transport.PreservesRetainFlags).Build(), stoppingToken);
                         if (heartbeatSubscription.Items.Count == 0 || heartbeatSubscription.Items.Any(item =>
-                                !item.ResultCode.ToString().StartsWith("GrantedQoS", StringComparison.OrdinalIgnoreCase)))
+                                !IsRequestedGrant(item.ResultCode, _uplinkQos)))
                             throw new InvalidOperationException("MQTT broker rejected the heartbeat topic subscription.");
                         Interlocked.Exchange(ref _subscriptionReady, 1);
                         if (!_transport.PreservesRetainFlags)
