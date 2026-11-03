@@ -22,6 +22,14 @@ public sealed class MqttQosPolicyTests
         Assert.Throws<InvalidOperationException>(() => MqttTelemetrySubscriberService.ParseUplinkQos(value));
 
     [Fact]
+    public void AcceptsOnlyScopedGatewayAckTopics()
+    {
+        Assert.True(MqttTelemetrySubscriberService.CompatibleQosAckTopic("factory/site/line/gateway/commands/ack".Split('/')));
+        Assert.False(MqttTelemetrySubscriberService.CompatibleQosAckTopic("factory/site/line/gateway/commands".Split('/')));
+        Assert.False(MqttTelemetrySubscriberService.CompatibleQosAckTopic("factory/site/line/%2F/commands/ack".Split('/')));
+    }
+
+    [Fact]
     public void DoesNotClaimReadinessWhenBrokerGrantsLowerQos()
     {
         Assert.True(MqttTelemetrySubscriberService.IsRequestedGrant(MqttClientSubscribeResultCode.GrantedQoS2, MqttQualityOfServiceLevel.ExactlyOnce));
