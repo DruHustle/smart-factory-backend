@@ -1,0 +1,22 @@
+{
+  "services": {
+    "api": {
+      "networks": {
+        "default": {},
+        "database": {}
+      }
+    },
+    "worker": {
+      "networks": {
+        "default": {},
+        "database": {}
+      }
+    }
+  },
+  "networks": {
+    "database": {
+      "name": "onesa-factory-database",
+      "external": true
+    }
+  }
+}

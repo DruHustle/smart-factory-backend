@@ -1,0 +1,125 @@
+{
+  "name": "onesa-factory-database",
+  "services": {
+    "postgres": {
+      "image": "${FACTORY_POSTGRES_IMAGE:?Use a reviewed source-compatible official PostgreSQL image digest}",
+      "platform": "${FACTORY_POSTGRES_PLATFORM:?Use the qualified target platform}",
+      "profiles": [
+        "candidate-database"
+      ],
+      "restart": "unless-stopped",
+      "user": "${FACTORY_POSTGRES_UID:?Use the reviewed image postgres UID}:${FACTORY_POSTGRES_GID:?Use the reviewed image postgres GID}",
+      "read_only": true,
+      "tmpfs": [
+        "/tmp:rw,nosuid,noexec,size=64m,mode=1777",
+        "/var/run/postgresql:rw,nosuid,noexec,size=16m,mode=1777"
+      ],
+      "cap_drop": [
+        "ALL"
+      ],
+      "security_opt": [
+        "no-new-privileges:true"
+      ],
+      "pids_limit": 256,
+      "stop_grace_period": "120s",
+      "mem_limit": "${FACTORY_POSTGRES_MEMORY_LIMIT:?Use the measured database memory budget}",
+      "cpus": "${FACTORY_POSTGRES_CPU_LIMIT:?Use the measured database CPU budget}",
+      "shm_size": "${FACTORY_POSTGRES_SHM_SIZE:?Use the qualified database shared-memory budget}",
+      "environment": {
+        "POSTGRES_USER": "postgres",
+        "POSTGRES_DB": "postgres",
+        "POSTGRES_PASSWORD_FILE": "/run/secrets/postgres_bootstrap_password",
+        "POSTGRES_INITDB_ARGS": "--auth-host=scram-sha-256 --auth-local=peer",
+        "PGDATA": "/var/lib/postgresql/data/pgdata"
+      },
+      "command": [
+        "postgres",
+        "-c",
+        "ssl=on",
+        "-c",
+        "ssl_min_protocol_version=TLSv1.2",
+        "-c",
+        "ssl_cert_file=/run/postgres-tls/server.crt",
+        "-c",
+        "ssl_key_file=/run/postgres-tls/server.key",
+        "-c",
+        "hba_file=/etc/postgresql/pg_hba.conf",
+        "-c",
+        "password_encryption=scram-sha-256",
+        "-c",
+        "max_connections=${FACTORY_POSTGRES_MAX_CONNECTIONS:?Use the reviewed connection budget}"
+      ],
+      "volumes": [
+        {
+          "type": "volume",
+          "source": "postgres_data",
+          "target": "/var/lib/postgresql/data"
+        },
+        {
+          "type": "bind",
+          "source": "${FACTORY_POSTGRES_TLS_DIR:?Use the existing private certificate directory}",
+          "target": "/run/postgres-tls",
+          "read_only": true,
+          "bind": {
+            "create_host_path": false
+          }
+        },
+        {
+          "type": "bind",
+          "source": "./postgres.pg_hba.conf",
+          "target": "/etc/postgresql/pg_hba.conf",
+          "read_only": true,
+          "bind": {
+            "create_host_path": false
+          }
+        }
+      ],
+      "secrets": [
+        "postgres_bootstrap_password"
+      ],
+      "networks": {
+        "database": {
+          "aliases": [
+            "factory-postgres"
+          ]
+        }
+      },
+      "healthcheck": {
+        "test": [
+          "CMD",
+          "pg_isready",
+          "--username=postgres",
+          "--dbname=postgres"
+        ],
+        "interval": "10s",
+        "timeout": "5s",
+        "retries": 12,
+        "start_period": "30s"
+      },
+      "logging": {
+        "driver": "json-file",
+        "options": {
+          "max-size": "10m",
+          "max-file": "3"
+        }
+      }
+    }
+  },
+  "networks": {
+    "database": {
+      "name": "onesa-factory-database",
+      "internal": true
+    }
+  },
+  "volumes": {
+    "postgres_data": {
+      "name": "${FACTORY_POSTGRES_VOLUME:?Use the existing reviewed durable volume}",
+      "external": true
+    }
+  },
+  "secrets": {
+    "postgres_bootstrap_password": {
+      "file": "${FACTORY_POSTGRES_PASSWORD_FILE:?Use a private bootstrap password file}"
+    }
+  }
+}
