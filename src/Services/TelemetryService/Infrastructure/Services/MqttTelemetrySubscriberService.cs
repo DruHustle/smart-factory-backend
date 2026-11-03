@@ -32,10 +32,12 @@ namespace SmartFactory.Services.TelemetryService.Infrastructure.Services
         private readonly bool _cleanSession;
         private readonly MqttQualityOfServiceLevel _uplinkQos;
         private int _subscriptionReady;
+        private int _grantedUplinkQos = -1;
         private readonly MqttEvidenceTransport _transport;
 
         public bool IsSubscriptionReady => _mqttClient.IsConnected && Volatile.Read(ref _subscriptionReady) == 1;
-        public int? GrantedTelemetryQos => IsSubscriptionReady ? (int)_uplinkQos : null;
+        public int? GrantedTelemetryQos => IsSubscriptionReady && Volatile.Read(ref _grantedUplinkQos) >= 0
+            ? Volatile.Read(ref _grantedUplinkQos) : null;
 
         public MqttTelemetrySubscriberService(IServiceProvider serviceProvider, IConfiguration configuration, IHostEnvironment environment, ILogger<MqttTelemetrySubscriberService> logger)
         {
@@ -88,6 +90,15 @@ namespace SmartFactory.Services.TelemetryService.Infrastructure.Services
 
         public static bool IsRequestedGrant(MqttClientSubscribeResultCode grant, MqttQualityOfServiceLevel requested) =>
             grant.ToString().Equals($"GrantedQoS{(int)requested}", StringComparison.OrdinalIgnoreCase);
+
+        // MQTT brokers may legitimately grant a lower maximum than requested.
+        // Report the actual grant, never the requested level, and reject errors
+        // or a protocol-invalid grant above the requested maximum.
+        public static int? GrantedQos(MqttClientSubscribeResultCode grant, MqttQualityOfServiceLevel requested)
+        {
+            var level = (int)grant;
+            return level is >= 0 and <= 2 && level <= (int)requested ? level : null;
+        }
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
@@ -184,20 +195,23 @@ namespace SmartFactory.Services.TelemetryService.Infrastructure.Services
                         await _mqttClient.ConnectAsync(options, stoppingToken);
                         var subscription = await _mqttClient.SubscribeAsync(new MqttTopicFilterBuilder().WithTopic(_topic)
                             .WithQualityOfServiceLevel(_uplinkQos).WithRetainAsPublished(_transport.PreservesRetainFlags).Build(), stoppingToken);
-                        if (subscription.Items.Count == 0 || subscription.Items.Any(item =>
-                                !IsRequestedGrant(item.ResultCode, _uplinkQos)))
+                        var telemetryGrants = subscription.Items.Select(item => GrantedQos(item.ResultCode, _uplinkQos)).ToArray();
+                        if (telemetryGrants.Length == 0 || telemetryGrants.Any(grant => !grant.HasValue))
                             throw new InvalidOperationException("MQTT broker rejected the telemetry topic subscription.");
                         var heartbeatSubscription = await _mqttClient.SubscribeAsync(new MqttTopicFilterBuilder().WithTopic(_heartbeatTopic)
                             .WithQualityOfServiceLevel(_uplinkQos).WithRetainAsPublished(_transport.PreservesRetainFlags).Build(), stoppingToken);
-                        if (heartbeatSubscription.Items.Count == 0 || heartbeatSubscription.Items.Any(item =>
-                                !IsRequestedGrant(item.ResultCode, _uplinkQos)))
+                        var heartbeatGrants = heartbeatSubscription.Items.Select(item => GrantedQos(item.ResultCode, _uplinkQos)).ToArray();
+                        if (heartbeatGrants.Length == 0 || heartbeatGrants.Any(grant => !grant.HasValue))
                             throw new InvalidOperationException("MQTT broker rejected the heartbeat topic subscription.");
                         var qosAckSubscription = await _mqttClient.SubscribeAsync(new MqttTopicFilterBuilder().WithTopic(_qosAckTopic)
                             .WithQualityOfServiceLevel(MqttQualityOfServiceLevel.AtLeastOnce).WithRetainAsPublished(_transport.PreservesRetainFlags).Build(), stoppingToken);
                         if (qosAckSubscription.Items.Count == 0 || qosAckSubscription.Items.Any(item =>
                                 !IsRequestedGrant(item.ResultCode, MqttQualityOfServiceLevel.AtLeastOnce)))
                             throw new InvalidOperationException("MQTT broker rejected the QoS acknowledgement subscription.");
+                        Interlocked.Exchange(ref _grantedUplinkQos, Math.Min(telemetryGrants.Min()!.Value, heartbeatGrants.Min()!.Value));
                         Interlocked.Exchange(ref _subscriptionReady, 1);
+                        if (GrantedTelemetryQos < (int)_uplinkQos)
+                            _logger.LogWarning("MQTT broker granted telemetry QoS {Granted} below the requested maximum {Requested}.", GrantedTelemetryQos, (int)_uplinkQos);
                         if (!_transport.PreservesRetainFlags)
                             _logger.LogWarning("MQTT 3.1.1 historical-only intake: retained delivery cannot be verified; telemetry and heartbeats cannot assert current state.");
                         _logger.LogInformation("Connected to MQTT {Host}:{Port} (TLS: {Tls}) and subscribed to {Topic}.", _host, _port, _useTls, _topic);
@@ -210,6 +224,7 @@ namespace SmartFactory.Services.TelemetryService.Infrastructure.Services
                 {
                     _logger.LogWarning(ex, "MQTT connect/subscribe failed; retrying in {DelaySeconds} seconds.", retryDelay.TotalSeconds);
                     Interlocked.Exchange(ref _subscriptionReady, 0);
+                    Interlocked.Exchange(ref _grantedUplinkQos, -1);
                     if (_mqttClient.IsConnected)
                     {
                         try { await _mqttClient.DisconnectAsync(); }
@@ -225,6 +240,7 @@ namespace SmartFactory.Services.TelemetryService.Infrastructure.Services
         public override async Task StopAsync(CancellationToken cancellationToken)
         {
             Interlocked.Exchange(ref _subscriptionReady, 0);
+            Interlocked.Exchange(ref _grantedUplinkQos, -1);
             if (_mqttClient.IsConnected) await _mqttClient.DisconnectAsync();
             await base.StopAsync(cancellationToken);
         }

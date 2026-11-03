@@ -41,10 +41,15 @@ public sealed class MqttQosPolicyTests
     }
 
     [Fact]
-    public void DoesNotClaimReadinessWhenBrokerGrantsLowerQos()
+    public void ReportsTheActualGrantAndRejectsInvalidGrants()
     {
         Assert.True(MqttTelemetrySubscriberService.IsRequestedGrant(MqttClientSubscribeResultCode.GrantedQoS2, MqttQualityOfServiceLevel.ExactlyOnce));
         Assert.False(MqttTelemetrySubscriberService.IsRequestedGrant(MqttClientSubscribeResultCode.GrantedQoS1, MqttQualityOfServiceLevel.ExactlyOnce));
         Assert.False(MqttTelemetrySubscriberService.IsRequestedGrant(MqttClientSubscribeResultCode.UnspecifiedError, MqttQualityOfServiceLevel.AtLeastOnce));
+        Assert.Equal(2, MqttTelemetrySubscriberService.GrantedQos(MqttClientSubscribeResultCode.GrantedQoS2, MqttQualityOfServiceLevel.ExactlyOnce));
+        Assert.Equal(1, MqttTelemetrySubscriberService.GrantedQos(MqttClientSubscribeResultCode.GrantedQoS1, MqttQualityOfServiceLevel.ExactlyOnce));
+        Assert.Equal(0, MqttTelemetrySubscriberService.GrantedQos(MqttClientSubscribeResultCode.GrantedQoS0, MqttQualityOfServiceLevel.ExactlyOnce));
+        Assert.Null(MqttTelemetrySubscriberService.GrantedQos(MqttClientSubscribeResultCode.GrantedQoS2, MqttQualityOfServiceLevel.AtLeastOnce));
+        Assert.Null(MqttTelemetrySubscriberService.GrantedQos(MqttClientSubscribeResultCode.UnspecifiedError, MqttQualityOfServiceLevel.ExactlyOnce));
     }
 }
