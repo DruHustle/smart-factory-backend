@@ -191,6 +191,23 @@ public sealed class AssetsController(AasProvisioningService provisioner, EdgeCon
         }
     }
 
+    [HttpPost("mqtt-qos"), Authorize(Roles = "engineer,admin")]
+    public async Task<IActionResult> ConfigureMqttQos([FromBody] QosConfigurationRequest request, CancellationToken ct)
+    {
+        try
+        {
+            await edgePublisher.PublishQosConfigurationAsync(request, ct);
+            return Accepted(new { published = true, commandId = request.CommandId, applied = false });
+        }
+        catch (ArgumentException error) { return BadRequest(new { error = error.Message }); }
+        catch (InvalidOperationException error) { return StatusCode(503, new { error = error.Message }); }
+        catch (Exception error)
+        {
+            logger.LogError(error, "MQTT QoS request could not be published.");
+            return StatusCode(502, new { error = "MQTT QoS request could not be published to the gateway." });
+        }
+    }
+
     private IActionResult? MapProvisioningFailure(Exception error)
     {
         var causes = new List<Exception>();
